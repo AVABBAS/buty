@@ -14,6 +14,14 @@ export interface UserSyncPayload {
   savedLooks?: any[];
 }
 
+export function isSafeId(id: unknown): id is string {
+  if (typeof id !== 'string' && typeof id !== 'number') return false;
+  const str = String(id).trim();
+  if (!str || str.length > 64) return false;
+  if (str === '__proto__' || str === 'constructor' || str === 'prototype') return false;
+  return /^[a-zA-Z0-9_\-]{1,64}$/.test(str);
+}
+
 export interface DbStatus {
   type: 'postgresql' | 'embedded';
   connected: boolean;
@@ -124,7 +132,7 @@ class DatabaseService {
 
   async syncUserData(payload: UserSyncPayload): Promise<boolean> {
     const { telegramId, firstName, username, dna, closet, shelf, savedLooks } = payload;
-    if (!telegramId) return false;
+    if (!isSafeId(telegramId)) return false;
 
     if (this.isPostgres && this.pgPool) {
       try {
@@ -186,7 +194,7 @@ class DatabaseService {
     savedLooks?: any[];
     profile?: any;
   } | null> {
-    if (!telegramId) return null;
+    if (!isSafeId(telegramId)) return null;
 
     if (this.isPostgres && this.pgPool) {
       try {
@@ -255,7 +263,7 @@ class DatabaseService {
   }
 
   async deleteUserData(telegramId: string): Promise<boolean> {
-    if (!telegramId) return false;
+    if (!isSafeId(telegramId)) return false;
 
     if (this.isPostgres && this.pgPool) {
       try {

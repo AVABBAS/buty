@@ -3,7 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
-import { db } from './src/db/database.js';
+import { db, isSafeId } from './src/db/database.js';
 
 dotenv.config();
 
@@ -13,6 +13,10 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 const isProd = process.env.NODE_ENV === 'production';
+
+// Defensive Security Configurations
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
 
 // Support reasonable payload limits for compressed base64 images
 app.use(express.json({ limit: '10mb' }));
@@ -27,8 +31,16 @@ app.use((req, res, next) => {
   );
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('X-XSS-Protection', '0');
+  res.setHeader('Permissions-Policy', 'camera=(self), microphone=(), geolocation=()');
   next();
 });
+
+// Input Sanitization Helper
+function sanitizeText(input: unknown, maxLen = 2000): string {
+  if (typeof input !== 'string') return '';
+  return input.trim().slice(0, maxLen);
+}
 
 // In-Memory Rate Limiter (Protects against AI API spam / DoS)
 const ipRequests = new Map<string, { count: number; resetTime: number }>();
@@ -225,8 +237,11 @@ function generateFallbackSecondOpinion(optionA: string, optionB: string, context
 // 1. Make It Mine
 app.post('/api/ai/make-it-mine', async (req: Request, res: Response) => {
   try {
-    const { prompt, vibe, photoBase64, userDna } = req.body;
-    const cacheKey = `mim:${prompt || ''}:${vibe || ''}:${photoBase64 ? 'photo' : 'no'}`;
+    const prompt = sanitizeText(req.body.prompt, 1500);
+    const vibe = sanitizeText(req.body.vibe, 100);
+    const userDna = req.body.userDna;
+    const photoBase64 = typeof req.body.photoBase64 === 'string' && req.body.photoBase64.startsWith('data:image') ? req.body.photoBase64 : undefined;
+    const cacheKey = `mim:${prompt}:${vibe}:${photoBase64 ? 'photo' : 'no'}`;
 
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
@@ -304,8 +319,10 @@ app.post('/api/ai/make-it-mine', async (req: Request, res: Response) => {
 // 2. AI Triage & SOS Solver
 app.post('/api/ai/triage', async (req: Request, res: Response) => {
   try {
-    const { problem, context, category } = req.body;
-    const cacheKey = `trg:${category || ''}:${problem || ''}`;
+    const problem = sanitizeText(req.body.problem, 1500);
+    const context = sanitizeText(req.body.context, 500);
+    const category = sanitizeText(req.body.category, 100);
+    const cacheKey = `trg:${category}:${problem}`;
 
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
@@ -356,7 +373,9 @@ app.post('/api/ai/triage', async (req: Request, res: Response) => {
 // 3. Second Opinion
 app.post('/api/ai/second-opinion', async (req: Request, res: Response) => {
   try {
-    const { optionA, optionB, context } = req.body;
+    const optionA = sanitizeText(req.body.optionA, 500);
+    const optionB = sanitizeText(req.body.optionB, 500);
+    const context = sanitizeText(req.body.context, 500);
     const cacheKey = `so:${optionA}:${optionB}:${context}`;
 
     const cached = getCached(cacheKey);
@@ -411,8 +430,11 @@ app.post('/api/ai/second-opinion', async (req: Request, res: Response) => {
 // 4. Today Plan & Glow Up Generator
 app.post('/api/ai/today-plan', async (req: Request, res: Response) => {
   try {
-    const { energy, mood, timeMinutes, occasion, userDna } = req.body;
-    const timeNum = parseInt(timeMinutes) || 10;
+    const energy = sanitizeText(req.body.energy, 50);
+    const mood = sanitizeText(req.body.mood, 50);
+    const timeNum = Math.min(Math.max(parseInt(req.body.timeMinutes) || 10, 1), 120);
+    const occasion = sanitizeText(req.body.occasion, 100);
+    const userDna = req.body.userDna;
     const cacheKey = `tp:${energy}:${mood}:${timeNum}:${occasion}`;
 
     const cached = getCached(cacheKey);
@@ -436,7 +458,7 @@ app.post('/api/ai/today-plan', async (req: Request, res: Response) => {
     const promptText = `برای مینیاپ آینا یک برنامه آماده‌سازی سریع و واقع‌گرایانه بساز:
 انرژی: ${energy}
 مود: ${mood}
-زمان موجود: ${timeMinutes} دقیقه
+زمان موجود: ${timeNum} دقیقه
 موقعیت: ${occasion}
 دی‌ان‌ای استایل کاربر: ${JSON.stringify(userDna || {})}
 
@@ -492,7 +514,12 @@ app.post('/api/ai/today-plan', async (req: Request, res: Response) => {
 // 5. Coach Chat (Empathetic Beauty Companion)
 app.post('/api/ai/coach', async (req: Request, res: Response) => {
   try {
-    const { message, history } = req.body;
+    const message = sanitizeText(req.body.message, 1500);
+    const history = req.body.history;
+
+    if (!message) {
+      return res.status(400).json({ error: 'Message cannot be empty' });
+    }
 
     if (!ai) {
       return res.json({
@@ -559,17 +586,17 @@ app.get('/api/telegram/config', (req: Request, res: Response) => {
 app.post('/api/user/sync', async (req: Request, res: Response) => {
   try {
     const { telegramId, firstName, username, dna, closet, shelf, savedLooks } = req.body;
-    if (!telegramId) {
-      return res.status(400).json({ error: 'telegramId is required' });
+    if (!isSafeId(telegramId)) {
+      return res.status(400).json({ error: 'Valid telegramId is required' });
     }
     const success = await db.syncUserData({
       telegramId: String(telegramId),
-      firstName,
-      username,
+      firstName: firstName ? sanitizeText(firstName, 100) : undefined,
+      username: username ? sanitizeText(username, 100) : undefined,
       dna,
-      closet,
-      shelf,
-      savedLooks,
+      closet: Array.isArray(closet) ? closet.slice(0, 500) : undefined,
+      shelf: Array.isArray(shelf) ? shelf.slice(0, 500) : undefined,
+      savedLooks: Array.isArray(savedLooks) ? savedLooks.slice(0, 500) : undefined,
     });
     return res.json({ ok: success });
   } catch (err) {
@@ -581,6 +608,9 @@ app.post('/api/user/sync', async (req: Request, res: Response) => {
 app.get('/api/user/profile/:telegramId', async (req: Request, res: Response) => {
   try {
     const { telegramId } = req.params;
+    if (!isSafeId(telegramId)) {
+      return res.status(400).json({ error: 'Invalid telegramId format' });
+    }
     const userData = await db.getUserData(String(telegramId));
     if (!userData) {
       return res.status(404).json({ error: 'User not found' });
@@ -595,7 +625,7 @@ app.get('/api/user/profile/:telegramId', async (req: Request, res: Response) => 
 app.post('/api/user/wipe', async (req: Request, res: Response) => {
   try {
     const { telegramId } = req.body;
-    if (!telegramId) return res.status(400).json({ error: 'telegramId is required' });
+    if (!isSafeId(telegramId)) return res.status(400).json({ error: 'Valid telegramId is required' });
     const success = await db.deleteUserData(String(telegramId));
     return res.json({ ok: success });
   } catch (err) {
@@ -624,8 +654,14 @@ app.get('/api/system/status', async (req: Request, res: Response) => {
 // Webhook endpoint for Telegram
 app.post('/api/telegram/webhook', async (req: Request, res: Response) => {
   try {
+    if (process.env.TELEGRAM_WEBHOOK_SECRET) {
+      const secretHeader = req.headers['x-telegram-bot-api-secret-token'];
+      if (secretHeader !== process.env.TELEGRAM_WEBHOOK_SECRET) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
     const update = req.body;
-    if (update?.message) {
+    if (update && typeof update === 'object' && update.message) {
       await handleTelegramMessage(update.message);
     }
     return res.json({ ok: true });
