@@ -20,6 +20,15 @@ import { ScannerModal } from './components/ScannerModal';
 import { RoutinePlayerModal } from './components/RoutinePlayerModal';
 import { OutfitMixerModal } from './components/OutfitMixerModal';
 import { SecondOpinionModal } from './components/SecondOpinionModal';
+import { TelegramLauncherModal } from './components/TelegramLauncherModal';
+import { ReadyCheckModal } from './components/modals/ReadyCheckModal';
+import { BeforeYouDoItModal } from './components/modals/BeforeYouDoItModal';
+import { CycleBeautyModal } from './components/modals/CycleBeautyModal';
+import { IntimateCareModal } from './components/modals/IntimateCareModal';
+import { BeautyDefenseModal } from './components/modals/BeautyDefenseModal';
+import { SmartShoppingModal } from './components/modals/SmartShoppingModal';
+import { PhotoCoachModal } from './components/modals/PhotoCoachModal';
+import { ExpressVibesModal } from './components/modals/ExpressVibesModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { safeStorage } from './utils/safeStorage';
 
@@ -53,7 +62,17 @@ export default function App() {
   const [routineTime, setRoutineTime] = useState<number>(10);
   const [isMixerOpen, setIsMixerOpen] = useState<boolean>(false);
   const [isSecondOpinionOpen, setIsSecondOpinionOpen] = useState<boolean>(false);
+  const [isTelegramSetupOpen, setIsTelegramSetupOpen] = useState<boolean>(false);
+  const [isReadyCheckOpen, setIsReadyCheckOpen] = useState<boolean>(false);
+  const [isBeforeYouDoItOpen, setIsBeforeYouDoItOpen] = useState<boolean>(false);
+  const [isCycleBeautyOpen, setIsCycleBeautyOpen] = useState<boolean>(false);
+  const [isIntimateCareOpen, setIsIntimateCareOpen] = useState<boolean>(false);
+  const [isBeautyDefenseOpen, setIsBeautyDefenseOpen] = useState<boolean>(false);
+  const [isSmartShoppingOpen, setIsSmartShoppingOpen] = useState<boolean>(false);
+  const [isPhotoCoachOpen, setIsPhotoCoachOpen] = useState<boolean>(false);
+  const [expressVibeMode, setExpressVibeMode] = useState<'surprise' | 'cute' | 'refresh' | null>(null);
   const [tgUserFirstName, setTgUserFirstName] = useState<string | undefined>();
+  const [tgUserId, setTgUserId] = useState<string | undefined>();
 
   // Persistent States
   const [userDna, setUserDna] = useState<BeautyDna>(() => {
@@ -85,14 +104,55 @@ export default function App() {
     safeStorage.set('ayna_saved_looks', savedLooks);
   }, [savedLooks]);
 
-  // Telegram WebApp Setup
+  // Sync to backend database
+  useEffect(() => {
+    if (!tgUserId) return;
+    const timeout = setTimeout(() => {
+      fetch('/api/user/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          telegramId: tgUserId,
+          firstName: tgUserFirstName,
+          dna: userDna,
+          closet: closetItems,
+          shelf: shelfItems,
+          savedLooks: savedLooks,
+        }),
+      }).catch(() => {
+        // Offline or server temporarily unreachable; safeStorage handles local persistence
+      });
+    }, 1500);
+
+    return () => clearTimeout(timeout);
+  }, [userDna, closetItems, shelfItems, savedLooks, tgUserId, tgUserFirstName]);
+
+  // Telegram WebApp Setup & Initial DB Hydration
   useEffect(() => {
     if (typeof window !== 'undefined' && window.Telegram?.WebApp) {
       const tg = window.Telegram.WebApp;
       tg.ready();
       tg.expand();
-      if (tg.initDataUnsafe?.user?.first_name) {
-        setTgUserFirstName(tg.initDataUnsafe.user.first_name);
+      const user = tg.initDataUnsafe?.user;
+      if (user?.first_name) {
+        setTgUserFirstName(user.first_name);
+      }
+      if (user?.id) {
+        const idStr = String(user.id);
+        setTgUserId(idStr);
+
+        // Fetch remote data from DB
+        fetch(`/api/user/profile/${idStr}`)
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data) => {
+            if (data) {
+              if (data.dna) setUserDna(data.dna);
+              if (Array.isArray(data.closet) && data.closet.length > 0) setClosetItems(data.closet);
+              if (Array.isArray(data.shelf) && data.shelf.length > 0) setShelfItems(data.shelf);
+              if (Array.isArray(data.savedLooks) && data.savedLooks.length > 0) setSavedLooks(data.savedLooks);
+            }
+          })
+          .catch(() => {});
       }
       if (tg.setHeaderColor) {
         tg.setHeaderColor('#141214');
@@ -103,13 +163,66 @@ export default function App() {
     }
   }, []);
 
-  // Back button handling in Telegram
+  // Unified Bidirectional Back button handling in Telegram WebApp
   useEffect(() => {
     if (typeof window !== 'undefined' && window.Telegram?.WebApp?.BackButton) {
       const tg = window.Telegram.WebApp;
-      if (currentTab !== 'home') {
+      const isAnyModalOpen =
+        isCoachOpen ||
+        isGoodEnoughOpen ||
+        isScannerOpen ||
+        isRoutineOpen ||
+        isMixerOpen ||
+        isSecondOpinionOpen ||
+        isTelegramSetupOpen ||
+        isReadyCheckOpen ||
+        isBeforeYouDoItOpen ||
+        isCycleBeautyOpen ||
+        isIntimateCareOpen ||
+        isBeautyDefenseOpen ||
+        isSmartShoppingOpen ||
+        isPhotoCoachOpen ||
+        Boolean(expressVibeMode);
+
+      if (isAnyModalOpen || currentTab !== 'home') {
         tg.BackButton.show();
-        const handleBack = () => setCurrentTab('home');
+
+        const handleBack = () => {
+          if (expressVibeMode) {
+            setExpressVibeMode(null);
+          } else if (isPhotoCoachOpen) {
+            setIsPhotoCoachOpen(false);
+          } else if (isSmartShoppingOpen) {
+            setIsSmartShoppingOpen(false);
+          } else if (isBeautyDefenseOpen) {
+            setIsBeautyDefenseOpen(false);
+          } else if (isIntimateCareOpen) {
+            setIsIntimateCareOpen(false);
+          } else if (isCycleBeautyOpen) {
+            setIsCycleBeautyOpen(false);
+          } else if (isBeforeYouDoItOpen) {
+            setIsBeforeYouDoItOpen(false);
+          } else if (isReadyCheckOpen) {
+            setIsReadyCheckOpen(false);
+          } else if (isTelegramSetupOpen) {
+            setIsTelegramSetupOpen(false);
+          } else if (isSecondOpinionOpen) {
+            setIsSecondOpinionOpen(false);
+          } else if (isMixerOpen) {
+            setIsMixerOpen(false);
+          } else if (isRoutineOpen) {
+            setIsRoutineOpen(false);
+          } else if (isScannerOpen) {
+            setIsScannerOpen(false);
+          } else if (isGoodEnoughOpen) {
+            setIsGoodEnoughOpen(false);
+          } else if (isCoachOpen) {
+            setIsCoachOpen(false);
+          } else if (currentTab !== 'home') {
+            setCurrentTab('home');
+          }
+        };
+
         tg.BackButton.onClick(handleBack);
         return () => {
           tg.BackButton.offClick(handleBack);
@@ -118,7 +231,24 @@ export default function App() {
         tg.BackButton.hide();
       }
     }
-  }, [currentTab]);
+  }, [
+    currentTab,
+    isCoachOpen,
+    isGoodEnoughOpen,
+    isScannerOpen,
+    isRoutineOpen,
+    isMixerOpen,
+    isSecondOpinionOpen,
+    isTelegramSetupOpen,
+    isReadyCheckOpen,
+    isBeforeYouDoItOpen,
+    isCycleBeautyOpen,
+    isIntimateCareOpen,
+    isBeautyDefenseOpen,
+    isSmartShoppingOpen,
+    isPhotoCoachOpen,
+    expressVibeMode,
+  ]);
 
   const handleAddClosetItem = (item: ClosetItem) => {
     setClosetItems((prev) => [item, ...prev]);
@@ -158,6 +288,7 @@ export default function App() {
             onOpenScanner={() => setIsScannerOpen(true)}
             onOpenRoutine={handleOpenRoutine}
             onOpenMixer={() => setIsMixerOpen(true)}
+            onOpenTelegramSetup={() => setIsTelegramSetupOpen(true)}
             savedLooksCount={savedLooks.length}
           />
 
@@ -172,6 +303,14 @@ export default function App() {
                 onOpenRoutine={handleOpenRoutine}
                 onOpenMixer={() => setIsMixerOpen(true)}
                 onOpenSecondOpinion={() => setIsSecondOpinionOpen(true)}
+                onOpenReadyCheck={() => setIsReadyCheckOpen(true)}
+                onOpenBeforeYouDoIt={() => setIsBeforeYouDoItOpen(true)}
+                onOpenCycleBeauty={() => setIsCycleBeautyOpen(true)}
+                onOpenIntimateCare={() => setIsIntimateCareOpen(true)}
+                onOpenBeautyDefense={() => setIsBeautyDefenseOpen(true)}
+                onOpenSmartShopping={() => setIsSmartShoppingOpen(true)}
+                onOpenPhotoCoach={() => setIsPhotoCoachOpen(true)}
+                onOpenExpressVibes={(mode) => setExpressVibeMode(mode)}
               />
             )}
 
@@ -179,6 +318,7 @@ export default function App() {
               <MakeItMineTab
                 onSaveLook={handleSaveLook}
                 onNavigateTab={(tab) => setCurrentTab(tab)}
+                onOpenMixer={() => setIsMixerOpen(true)}
                 savedLooks={savedLooks}
               />
             )}
@@ -204,11 +344,18 @@ export default function App() {
               <SosTab
                 onOpenGoodEnough={() => setIsGoodEnoughOpen(true)}
                 onOpenSecondOpinion={() => setIsSecondOpinionOpen(true)}
+                onOpenRoutine={handleOpenRoutine}
+                onOpenBeforeYouDoIt={() => setIsBeforeYouDoItOpen(true)}
+                onNavigateTab={(tab) => setCurrentTab(tab)}
               />
             )}
 
             {currentTab === 'wisdom' && (
-              <WisdomTab />
+              <WisdomTab
+                onOpenCycleBeauty={() => setIsCycleBeautyOpen(true)}
+                onOpenSmartShopping={() => setIsSmartShoppingOpen(true)}
+                onOpenBeautyDefense={() => setIsBeautyDefenseOpen(true)}
+              />
             )}
           </main>
 
@@ -251,6 +398,56 @@ export default function App() {
             isOpen={isSecondOpinionOpen}
             onClose={() => setIsSecondOpinionOpen(false)}
           />
+
+          <TelegramLauncherModal
+            isOpen={isTelegramSetupOpen}
+            onClose={() => setIsTelegramSetupOpen(false)}
+          />
+
+          <ReadyCheckModal
+            isOpen={isReadyCheckOpen}
+            onClose={() => setIsReadyCheckOpen(false)}
+            onFinish={() => setIsGoodEnoughOpen(true)}
+          />
+
+          <BeforeYouDoItModal
+            isOpen={isBeforeYouDoItOpen}
+            onClose={() => setIsBeforeYouDoItOpen(false)}
+          />
+
+          <CycleBeautyModal
+            isOpen={isCycleBeautyOpen}
+            onClose={() => setIsCycleBeautyOpen(false)}
+          />
+
+          <IntimateCareModal
+            isOpen={isIntimateCareOpen}
+            onClose={() => setIsIntimateCareOpen(false)}
+          />
+
+          <BeautyDefenseModal
+            isOpen={isBeautyDefenseOpen}
+            onClose={() => setIsBeautyDefenseOpen(false)}
+          />
+
+          <SmartShoppingModal
+            isOpen={isSmartShoppingOpen}
+            onClose={() => setIsSmartShoppingOpen(false)}
+          />
+
+          <PhotoCoachModal
+            isOpen={isPhotoCoachOpen}
+            onClose={() => setIsPhotoCoachOpen(false)}
+          />
+
+          {expressVibeMode && (
+            <ExpressVibesModal
+              isOpen={Boolean(expressVibeMode)}
+              mode={expressVibeMode}
+              onClose={() => setExpressVibeMode(null)}
+              onSaveLook={handleSaveLook}
+            />
+          )}
         </div>
       </div>
     </ErrorBoundary>

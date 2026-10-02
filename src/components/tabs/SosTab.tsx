@@ -21,9 +21,18 @@ import { sounds } from '../../utils/soundEffects';
 interface SosTabProps {
   onOpenGoodEnough: () => void;
   onOpenSecondOpinion: () => void;
+  onOpenRoutine?: (time: number) => void;
+  onOpenBeforeYouDoIt?: () => void;
+  onNavigateTab?: (tab: any) => void;
 }
 
-export const SosTab: React.FC<SosTabProps> = ({ onOpenGoodEnough, onOpenSecondOpinion }) => {
+export const SosTab: React.FC<SosTabProps> = ({
+  onOpenGoodEnough,
+  onOpenSecondOpinion,
+  onOpenRoutine,
+  onOpenBeforeYouDoIt,
+  onNavigateTab,
+}) => {
   const [activeSubTab, setActiveSubTab] = useState<'triage' | 'sos-categories' | 'second-opinion' | 'before-you-do-it'>('triage');
 
   // Triage state
@@ -222,6 +231,24 @@ export const SosTab: React.FC<SosTabProps> = ({ onOpenGoodEnough, onOpenSecondOp
               <div className="p-2.5 rounded-xl bg-emerald-950/30 border border-emerald-900/40 text-[11px] text-emerald-200">
                 🔒 {triageResult.reassuranceNote}
               </div>
+
+              {/* Action Jump Buttons */}
+              <div className="pt-1 flex gap-2">
+                {onOpenRoutine && (
+                  <button
+                    onClick={() => onOpenRoutine(3)}
+                    className="flex-1 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] flex items-center justify-center gap-1 shadow-md transition-colors"
+                  >
+                    <span>⏱️ شروع روتین ۳ دقیقه‌ای نجات</span>
+                  </button>
+                )}
+                <button
+                  onClick={onOpenGoodEnough}
+                  className="py-2 px-3 rounded-xl bg-stone-900 hover:bg-stone-850 border border-stone-800 text-stone-300 text-[11px] font-medium transition-colors"
+                >
+                  کافیه!
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -367,6 +394,15 @@ export const SosTab: React.FC<SosTabProps> = ({ onOpenGoodEnough, onOpenSecondOp
                 {beforeDoResult}
               </p>
             </div>
+          )}
+
+          {onOpenBeforeYouDoIt && (
+            <button
+              onClick={onOpenBeforeYouDoIt}
+              className="w-full py-2.5 rounded-2xl bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-700 hover:to-rose-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md transition-colors"
+            >
+              <span>باز کردن شبیه‌ساز کامل سنجش پشیمانی (Before You Do It)</span>
+            </button>
           )}
         </div>
       )}

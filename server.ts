@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
+import { db } from './src/db/database.js';
 
 dotenv.config();
 
@@ -15,6 +16,44 @@ const isProd = process.env.NODE_ENV === 'production';
 
 // Support reasonable payload limits for compressed base64 images
 app.use(express.json({ limit: '10mb' }));
+
+// -------------------------------------------------------------
+// Security Headers & Telegram WebApp IFrame Embed Compatibility
+// -------------------------------------------------------------
+app.use((req, res, next) => {
+  res.setHeader(
+    'Content-Security-Policy',
+    "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org tg:;"
+  );
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+
+// In-Memory Rate Limiter (Protects against AI API spam / DoS)
+const ipRequests = new Map<string, { count: number; resetTime: number }>();
+const RATE_LIMIT_WINDOW = 60 * 1000;
+const MAX_REQUESTS_PER_WINDOW = 120;
+
+app.use('/api', (req, res, next) => {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+  const record = ipRequests.get(ip);
+
+  if (!record || now > record.resetTime) {
+    ipRequests.set(ip, { count: 1, resetTime: now + RATE_LIMIT_WINDOW });
+    return next();
+  }
+
+  if (record.count >= MAX_REQUESTS_PER_WINDOW) {
+    return res.status(429).json({
+      error: 'تعداد درخواست‌ها بیش از حد مجاز است. لطفاً چند لحظه صبر کنید.',
+    });
+  }
+
+  record.count += 1;
+  next();
+});
 
 // -------------------------------------------------------------
 // Server-Side In-Memory Cache (Essential for 50,000+ Users Scale)
@@ -499,9 +538,210 @@ app.post('/api/ai/coach', async (req: Request, res: Response) => {
 });
 
 // -------------------------------------------------------------
+// Telegram Bot API Integration (Webhook, Polling & Menu Button)
+// -------------------------------------------------------------
+const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
+const appUrl = process.env.APP_URL || 'https://ais-dev-untga77ourphtssjqqugh5-181611757650.europe-west2.run.app';
+let botUsername: string | null = null;
+
+// Config status for in-app launcher
+app.get('/api/telegram/config', (req: Request, res: Response) => {
+  res.json({
+    appUrl,
+    botTokenConfigured: !!telegramBotToken,
+    botUsername,
+  });
+});
+
+// -------------------------------------------------------------
+// Database Persistence Endpoints (User Sync, Closet & Looks)
+// -------------------------------------------------------------
+app.post('/api/user/sync', async (req: Request, res: Response) => {
+  try {
+    const { telegramId, firstName, username, dna, closet, shelf, savedLooks } = req.body;
+    if (!telegramId) {
+      return res.status(400).json({ error: 'telegramId is required' });
+    }
+    const success = await db.syncUserData({
+      telegramId: String(telegramId),
+      firstName,
+      username,
+      dna,
+      closet,
+      shelf,
+      savedLooks,
+    });
+    return res.json({ ok: success });
+  } catch (err) {
+    console.error('Error in /api/user/sync:', err);
+    return res.status(500).json({ error: 'Sync failed' });
+  }
+});
+
+app.get('/api/user/profile/:telegramId', async (req: Request, res: Response) => {
+  try {
+    const { telegramId } = req.params;
+    const userData = await db.getUserData(String(telegramId));
+    if (!userData) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    return res.json(userData);
+  } catch (err) {
+    console.error('Error fetching user profile:', err);
+    return res.status(500).json({ error: 'Fetch failed' });
+  }
+});
+
+app.post('/api/user/wipe', async (req: Request, res: Response) => {
+  try {
+    const { telegramId } = req.body;
+    if (!telegramId) return res.status(400).json({ error: 'telegramId is required' });
+    const success = await db.deleteUserData(String(telegramId));
+    return res.json({ ok: success });
+  } catch (err) {
+    return res.status(500).json({ error: 'Wipe failed' });
+  }
+});
+
+app.get('/api/system/status', async (req: Request, res: Response) => {
+  try {
+    const dbStatus = await db.getStatus();
+    return res.json({
+      ok: true,
+      database: dbStatus,
+      telegramBot: {
+        configured: !!telegramBotToken,
+        username: botUsername,
+        appUrl,
+      },
+      serverTime: new Date().toISOString(),
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: 'Failed to get status' });
+  }
+});
+
+// Webhook endpoint for Telegram
+app.post('/api/telegram/webhook', async (req: Request, res: Response) => {
+  try {
+    const update = req.body;
+    if (update?.message) {
+      await handleTelegramMessage(update.message);
+    }
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('Telegram webhook error:', err);
+    return res.json({ ok: false });
+  }
+});
+
+async function handleTelegramMessage(message: any) {
+  if (!telegramBotToken || !message?.chat?.id) return;
+  const chatId = message.chat.id;
+  const text = message.text || '';
+  const firstName = message.from?.first_name || 'دوست من';
+
+  if (text.startsWith('/start')) {
+    const welcomeText = `سلام ${firstName} عزیز! 🌸\nبه مینی‌اپ **«آینـا»** خوش آمدی.\n\n✨ «هر چیزی که خوشت میاد، نسخه مناسب خودت رو بساز.»\n\nبرای ورود و تجربه کامل مینی‌اپ، دکمه زیر را لمس کنید:`;
+
+    // 1. Send welcoming message with WebApp inline button
+    await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: welcomeText,
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: '✨ ورود به مینی‌اپ آینـا',
+                web_app: { url: appUrl }
+              }
+            ]
+          ]
+        }
+      })
+    }).catch((e) => console.warn('Failed to send Telegram welcome message:', e));
+
+    // 2. Set chat menu button for this chat
+    await fetch(`https://api.telegram.org/bot${telegramBotToken}/setChatMenuButton`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        menu_button: {
+          type: 'web_app',
+          text: '💄 باز کردن آینـا',
+          web_app: { url: appUrl }
+        }
+      })
+    }).catch(() => {});
+  }
+}
+
+// Optional Polling Runner for environments without webhook
+async function initTelegramBot() {
+  if (!telegramBotToken) {
+    console.log('TELEGRAM_BOT_TOKEN not provided; bot auto-responder inactive. WebApp works with any bot.');
+    return;
+  }
+
+  try {
+    const meRes = await fetch(`https://api.telegram.org/bot${telegramBotToken}/getMe`);
+    const meData = await meRes.json();
+    if (meData?.ok) {
+      botUsername = meData.result.username;
+      console.log(`Telegram Bot @${botUsername} connected successfully!`);
+
+      // Set default menu button globally
+      await fetch(`https://api.telegram.org/bot${telegramBotToken}/setChatMenuButton`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          menu_button: {
+            type: 'web_app',
+            text: '💄 باز کردن آینـا',
+            web_app: { url: appUrl }
+          }
+        })
+      });
+
+      // Simple long-polling loop
+      let offset = 0;
+      const poll = async () => {
+        try {
+          const updatesRes = await fetch(
+            `https://api.telegram.org/bot${telegramBotToken}/getUpdates?offset=${offset}&timeout=25`
+          );
+          const updatesData = await updatesRes.json();
+          if (updatesData?.ok && Array.isArray(updatesData.result)) {
+            for (const update of updatesData.result) {
+              offset = update.update_id + 1;
+              if (update.message) {
+                await handleTelegramMessage(update.message);
+              }
+            }
+          }
+        } catch {
+          // Retry gracefully
+        }
+        setTimeout(poll, 1500);
+      };
+      poll();
+    }
+  } catch (err) {
+    console.warn('Failed to initialize Telegram Bot:', err);
+  }
+}
+
+// -------------------------------------------------------------
 // Vite Middleware / Static Serving
 // -------------------------------------------------------------
 async function startServer() {
+  await db.init();
+
   if (!isProd) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
@@ -518,6 +758,7 @@ async function startServer() {
 
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT} in ${isProd ? 'production' : 'development'} mode (Cached & Scalable)`);
+    initTelegramBot();
   });
 }
 

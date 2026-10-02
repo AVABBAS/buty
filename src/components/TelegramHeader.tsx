@@ -1,5 +1,6 @@
-import React from 'react';
-import { Sparkles, ShieldCheck, HeartHandshake, Smartphone, Monitor } from 'lucide-react';
+import React, { useState } from 'react';
+import { Sparkles, ShieldCheck, HeartHandshake, Smartphone, Monitor, Volume2, VolumeX } from 'lucide-react';
+import { sounds } from '../utils/soundEffects';
 
 interface TelegramHeaderProps {
   userFirstName?: string;
@@ -9,6 +10,7 @@ interface TelegramHeaderProps {
   onOpenScanner: () => void;
   onOpenRoutine: (time: number) => void;
   onOpenMixer: () => void;
+  onOpenTelegramSetup: () => void;
   savedLooksCount: number;
 }
 
@@ -20,8 +22,16 @@ export const TelegramHeader: React.FC<TelegramHeaderProps> = ({
   onOpenScanner,
   onOpenRoutine,
   onOpenMixer,
+  onOpenTelegramSetup,
   savedLooksCount,
 }) => {
+  const [isMuted, setIsMuted] = useState<boolean>(() => sounds.isMuted());
+
+  const handleToggleSound = () => {
+    const next = sounds.toggleMute();
+    setIsMuted(next);
+  };
+
   return (
     <header className="sticky top-0 z-30 bg-stone-950/90 backdrop-blur-md border-b border-stone-800/80 px-3.5 py-2.5 select-none space-y-2">
       <div className="flex items-center justify-between">
@@ -62,6 +72,19 @@ export const TelegramHeader: React.FC<TelegramHeaderProps> = ({
             <span>رفیق آینا</span>
           </button>
 
+          {/* Sound Toggle */}
+          <button
+            onClick={handleToggleSound}
+            className={`w-7 h-7 rounded-xl flex items-center justify-center border transition-colors ${
+              isMuted
+                ? 'bg-stone-900 border-stone-800 text-stone-500 hover:text-stone-300'
+                : 'bg-stone-900 border-stone-800 text-amber-300 hover:text-amber-200'
+            }`}
+            title={isMuted ? 'روشن کردن صدا' : 'بی‌صدا کردن'}
+          >
+            {isMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+          </button>
+
           {/* Desktop/Mobile Frame Toggle */}
           <button
             onClick={onToggleFrame}
@@ -75,6 +98,12 @@ export const TelegramHeader: React.FC<TelegramHeaderProps> = ({
 
       {/* Quick Access Action Bar */}
       <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 text-[11px] no-scrollbar">
+        <button
+          onClick={onOpenTelegramSetup}
+          className="shrink-0 bg-blue-950/70 hover:bg-blue-900 border border-blue-700/60 text-blue-200 px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1 font-bold shadow-xs"
+        >
+          <span>🚀 اتصال به تلگرام</span>
+        </button>
         <button
           onClick={() => onOpenRoutine(10)}
           className="shrink-0 bg-stone-900 hover:bg-stone-800 border border-stone-800 hover:border-stone-700 text-stone-300 px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1"

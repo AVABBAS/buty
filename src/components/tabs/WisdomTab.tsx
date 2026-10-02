@@ -15,7 +15,17 @@ import {
 } from 'lucide-react';
 import { DEFENSE_LESSONS, MYTHS_QUIZ } from '../../data/beautyKnowledge';
 
-export const WisdomTab: React.FC = () => {
+interface WisdomTabProps {
+  onOpenCycleBeauty?: () => void;
+  onOpenSmartShopping?: () => void;
+  onOpenBeautyDefense?: () => void;
+}
+
+export const WisdomTab: React.FC<WisdomTabProps> = ({
+  onOpenCycleBeauty,
+  onOpenSmartShopping,
+  onOpenBeautyDefense,
+}) => {
   const [activeSection, setActiveSection] = useState<'defense' | 'myths' | 'period' | 'shop'>('defense');
   const [openLessonId, setOpenLessonId] = useState<string>(DEFENSE_LESSONS[0].id);
 
@@ -117,6 +127,15 @@ export const WisdomTab: React.FC = () => {
               );
             })}
           </div>
+
+          {onOpenBeautyDefense && (
+            <button
+              onClick={onOpenBeautyDefense}
+              className="w-full py-2.5 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md transition-colors"
+            >
+              <span>🛡️ باز کردن رادار فیلترها و سپر دفاعی (Beauty Defense)</span>
+            </button>
+          )}
         </div>
       )}
 
@@ -231,6 +250,15 @@ export const WisdomTab: React.FC = () => {
               </p>
             </div>
           </div>
+
+          {onOpenCycleBeauty && (
+            <button
+              onClick={onOpenCycleBeauty}
+              className="w-full py-2.5 rounded-2xl bg-gradient-to-r from-rose-600 to-purple-600 hover:from-rose-700 hover:to-purple-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md transition-colors"
+            >
+              <span>🌙 تنظیم پیشرفته بر اساس روزهای چرخه ماهانه (Cycle Beauty)</span>
+            </button>
+          )}
         </div>
       )}
 
@@ -249,6 +277,15 @@ export const WisdomTab: React.FC = () => {
             <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
             <span>هشدار هوشمند: اول تب «کمد و شلف من» را چک کن تا خرید تکراری انجام ندهی.</span>
           </div>
+
+          {onOpenSmartShopping && (
+            <button
+              onClick={onOpenSmartShopping}
+              className="w-full py-2.5 rounded-2xl bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md transition-colors"
+            >
+              <span>⚖️ ماشین‌حساب هوشمند: بخرم یا نخرم؟ (Buy or Don't Buy)</span>
+            </button>
+          )}
 
           <div className="grid grid-cols-2 gap-2 text-xs">
             {[

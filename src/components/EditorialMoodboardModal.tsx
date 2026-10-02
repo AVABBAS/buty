@@ -20,10 +20,18 @@ export const EditorialMoodboardModal: React.FC<EditorialMoodboardModalProps> = (
   if (!isOpen) return null;
 
   const handleShare = () => {
+    const shareText = `✨ استایل و لوک اختصاصی من در «آینـا»:\n«${result.yourVersion.title}» (${result.referenceAnalysis.vibe})\n\n💡 نکته کلیدی: ${result.yourVersion.coreAdvice}\n\n👇 نسخه مناسب خودت رو بساز:`;
+    const shareUrl = typeof window !== 'undefined' ? window.location.origin : '';
+    const telegramShareLink = `https://t.me/share/url?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent(shareText)}`;
+
+    if (window.Telegram?.WebApp?.openTelegramLink) {
+      window.Telegram.WebApp.openTelegramLink(telegramShareLink);
+    } else if (typeof window !== 'undefined') {
+      window.open(telegramShareLink, '_blank');
+    }
+
     if (navigator.clipboard) {
-      navigator.clipboard.writeText(
-        `لوک اختصاصی من در آینـا:\n${result.yourVersion.title}\nوایب: ${result.referenceAnalysis.vibe}\nنکته کلیدی: ${result.yourVersion.coreAdvice}`
-      );
+      navigator.clipboard.writeText(`${shareText}\n${shareUrl}`);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
@@ -57,6 +65,9 @@ export const EditorialMoodboardModal: React.FC<EditorialMoodboardModalProps> = (
               src={imageUrl || 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=600&auto=format&fit=crop&q=80'}
               alt="Editorial Look"
               className="w-full h-full object-cover"
+              onError={(e) => {
+                e.currentTarget.src = 'https://images.unsplash.com/photo-1490481651871-ab68de25d43d?w=600&auto=format&fit=crop&q=80';
+              }}
             />
             <div className="absolute inset-0 bg-gradient-to-t from-stone-950/80 via-transparent to-transparent" />
             <div className="absolute bottom-2.5 right-2.5 left-2.5">

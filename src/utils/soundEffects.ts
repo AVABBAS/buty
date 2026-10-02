@@ -1,12 +1,32 @@
 /**
  * Simple Web Audio API Synthesizer for gentle beauty routine chimes and feedback.
+ * Supports sound muting and graceful browser policy handling.
  */
 
 class SoundEffects {
   private ctx: AudioContext | null = null;
+  private muted: boolean = false;
+
+  constructor() {
+    if (typeof window !== 'undefined') {
+      this.muted = localStorage.getItem('ayna_sound_muted') === 'true';
+    }
+  }
+
+  public isMuted(): boolean {
+    return this.muted;
+  }
+
+  public toggleMute(): boolean {
+    this.muted = !this.muted;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('ayna_sound_muted', String(this.muted));
+    }
+    return this.muted;
+  }
 
   private getContext(): AudioContext | null {
-    if (typeof window === 'undefined') return null;
+    if (typeof window === 'undefined' || this.muted) return null;
     if (!this.ctx) {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       if (AudioCtx) {
@@ -21,6 +41,7 @@ class SoundEffects {
 
   // Soft zen bell chime
   playChime(type: 'step' | 'complete' | 'click' = 'step') {
+    if (this.muted) return;
     try {
       const ctx = this.getContext();
       if (!ctx) return;

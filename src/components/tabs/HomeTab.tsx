@@ -34,6 +34,14 @@ interface HomeTabProps {
   onOpenRoutine: (time: number) => void;
   onOpenMixer: () => void;
   onOpenSecondOpinion: () => void;
+  onOpenReadyCheck: () => void;
+  onOpenBeforeYouDoIt: () => void;
+  onOpenCycleBeauty: () => void;
+  onOpenIntimateCare: () => void;
+  onOpenBeautyDefense: () => void;
+  onOpenSmartShopping: () => void;
+  onOpenPhotoCoach: () => void;
+  onOpenExpressVibes: (mode: 'surprise' | 'cute' | 'refresh') => void;
 }
 
 export const HomeTab: React.FC<HomeTabProps> = ({
@@ -44,6 +52,14 @@ export const HomeTab: React.FC<HomeTabProps> = ({
   onOpenRoutine,
   onOpenMixer,
   onOpenSecondOpinion,
+  onOpenReadyCheck,
+  onOpenBeforeYouDoIt,
+  onOpenCycleBeauty,
+  onOpenIntimateCare,
+  onOpenBeautyDefense,
+  onOpenSmartShopping,
+  onOpenPhotoCoach,
+  onOpenExpressVibes,
 }) => {
   // Daily Check States
   const [energy, setEnergy] = useState<EnergyLevel>('medium');
@@ -224,6 +240,138 @@ export const HomeTab: React.FC<HomeTabProps> = ({
             </div>
             <span className="text-xs font-bold text-stone-200">🆘 بحران زیبایی / تریـاژ</span>
             <span className="text-[10px] text-stone-400 mt-0.5">جوش، وز مو، ماسیدن آرایش، کلافگی</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Specialized Power Tools Grid (فیچرهای تکمیلی تخصصی) */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between px-1">
+          <h2 className="text-xs font-bold text-stone-200 flex items-center gap-1.5">
+            <span>جعبه‌ابزار تخصصی و هوشمند آینـا</span>
+            <span className="text-[10px] text-amber-300 bg-amber-950/80 px-1.5 py-0.2 rounded font-latin">POWER TOOLS</span>
+          </h2>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+          {/* 1. Ready Check */}
+          <button
+            onClick={onOpenReadyCheck}
+            className="p-3 rounded-2xl bg-stone-900/90 hover:bg-stone-850 border border-stone-800 hover:border-emerald-800/60 text-right transition-all flex flex-col justify-between"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-base">✅</span>
+              <span className="text-[9px] text-emerald-400 bg-emerald-950/80 px-1.5 py-0.5 rounded font-latin">Checklist</span>
+            </div>
+            <div>
+              <span className="font-bold text-stone-200 block text-xs">چک‌لیست خروج</span>
+              <span className="text-[10px] text-stone-400 block mt-0.5">۱۱ گام مطمئن قبل از رفتن</span>
+            </div>
+          </button>
+
+          {/* 2. Before You Do It */}
+          <button
+            onClick={onOpenBeforeYouDoIt}
+            className="p-3 rounded-2xl bg-stone-900/90 hover:bg-stone-850 border border-stone-800 hover:border-amber-800/60 text-right transition-all flex flex-col justify-between"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-base">✂️</span>
+              <span className="text-[9px] text-amber-400 bg-amber-950/80 px-1.5 py-0.5 rounded font-latin">Reality</span>
+            </div>
+            <div>
+              <span className="font-bold text-stone-200 block text-xs">قبل از اینکه انجام بدی</span>
+              <span className="text-[10px] text-stone-400 block mt-0.5">سنجش پشیمانی کوتاهی و دکلره</span>
+            </div>
+          </button>
+
+          {/* 3. Cycle Beauty */}
+          <button
+            onClick={onOpenCycleBeauty}
+            className="p-3 rounded-2xl bg-stone-900/90 hover:bg-stone-850 border border-stone-800 hover:border-rose-800/60 text-right transition-all flex flex-col justify-between"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-base">🌙</span>
+              <span className="text-[9px] text-rose-400 bg-rose-950/80 px-1.5 py-0.5 rounded font-latin">Hormone</span>
+            </div>
+            <div>
+              <span className="font-bold text-stone-200 block text-xs">چرخه ماهانه و پوست</span>
+              <span className="text-[10px] text-stone-400 block mt-0.5">تطبیق استایل با انرژی بیولوژیک</span>
+            </div>
+          </button>
+
+          {/* 4. Smart Shopping */}
+          <button
+            onClick={onOpenSmartShopping}
+            className="p-3 rounded-2xl bg-stone-900/90 hover:bg-stone-850 border border-stone-800 hover:border-teal-800/60 text-right transition-all flex flex-col justify-between"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-base">🛍️</span>
+              <span className="text-[9px] text-teal-400 bg-teal-950/80 px-1.5 py-0.5 rounded font-latin">Shopping</span>
+            </div>
+            <div>
+              <span className="font-bold text-stone-200 block text-xs">بخرم یا نخرم؟</span>
+              <span className="text-[10px] text-stone-400 block mt-0.5">ماشین‌حساب فیلتر خرید هیجانی</span>
+            </div>
+          </button>
+
+          {/* 5. Photo Coach */}
+          <button
+            onClick={onOpenPhotoCoach}
+            className="p-3 rounded-2xl bg-stone-900/90 hover:bg-stone-850 border border-stone-800 hover:border-blue-800/60 text-right transition-all flex flex-col justify-between"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-base">📸</span>
+              <span className="text-[9px] text-blue-400 bg-blue-950/80 px-1.5 py-0.5 rounded font-latin">Photo</span>
+            </div>
+            <div>
+              <span className="font-bold text-stone-200 block text-xs">مربی عکاسی و استوری</span>
+              <span className="text-[10px] text-stone-400 block mt-0.5">زاویه لنز، نور و ژست طبیعی</span>
+            </div>
+          </button>
+
+          {/* 6. Intimate Care */}
+          <button
+            onClick={onOpenIntimateCare}
+            className="p-3 rounded-2xl bg-stone-900/90 hover:bg-stone-850 border border-stone-800 hover:border-teal-800/60 text-right transition-all flex flex-col justify-between"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-base">🧼</span>
+              <span className="text-[9px] text-teal-400 bg-teal-950/80 px-1.5 py-0.5 rounded font-latin">Care</span>
+            </div>
+            <div>
+              <span className="font-bold text-stone-200 block text-xs">مراقبت بهداشتی فردی</span>
+              <span className="text-[10px] text-stone-400 block mt-0.5">بهداشت، تنوع طبیعی و تریاژ</span>
+            </div>
+          </button>
+
+          {/* 7. Beauty Defense */}
+          <button
+            onClick={onOpenBeautyDefense}
+            className="p-3 rounded-2xl bg-stone-900/90 hover:bg-stone-850 border border-stone-800 hover:border-purple-800/60 text-right transition-all flex flex-col justify-between"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-base">🛡️</span>
+              <span className="text-[9px] text-purple-400 bg-purple-950/80 px-1.5 py-0.5 rounded font-latin">Anti-FOMO</span>
+            </div>
+            <div>
+              <span className="font-bold text-stone-200 block text-xs">سپر دفاعی زیبایی</span>
+              <span className="text-[10px] text-stone-400 block mt-0.5">تشخیص فیلترها و دروغ تبلیغات</span>
+            </div>
+          </button>
+
+          {/* 8. Express Vibes: Cute / Surprise / Refresh */}
+          <button
+            onClick={() => onOpenExpressVibes('cute')}
+            className="p-3 rounded-2xl bg-gradient-to-tr from-stone-900 to-rose-950/40 hover:bg-stone-850 border border-stone-800 hover:border-rose-700/60 text-right transition-all flex flex-col justify-between"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-base">🎀</span>
+              <span className="text-[9px] text-rose-300 bg-rose-950/80 px-1.5 py-0.5 rounded font-latin">Cute Mode</span>
+            </div>
+            <div>
+              <span className="font-bold text-stone-200 block text-xs">پکیج صورتی کیوت</span>
+              <span className="text-[10px] text-stone-400 block mt-0.5">آرایش، لباس و موی شاداب</span>
+            </div>
           </button>
         </div>
       </div>

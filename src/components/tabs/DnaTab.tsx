@@ -8,7 +8,10 @@ import {
   Heart,
   HelpCircle,
   Check,
-  Compass
+  Compass,
+  Download,
+  Trash2,
+  ShieldCheck
 } from 'lucide-react';
 import { STYLE_ARCHETYPES, COLOR_PALETTES } from '../../data/beautyKnowledge';
 import { BeautyDna, StyleDna } from '../../types';
@@ -417,6 +420,34 @@ export const DnaTab: React.FC<DnaTabProps> = ({ dna, onUpdateDna }) => {
               {motivation === m && <Check className="w-3.5 h-3.5 text-rose-400" />}
             </button>
           ))}
+        </div>
+      </div>
+
+      {/* Data Ownership & Privacy (Commercial Grade) */}
+      <div className="rounded-2xl bg-stone-850 border border-stone-800 p-4 space-y-3">
+        <div className="flex items-center gap-1.5 text-xs font-bold text-stone-200">
+          <ShieldCheck className="w-4 h-4 text-emerald-400" />
+          <span>حریم خصوصی و مالکیت داده‌ها</span>
+        </div>
+        <p className="text-[11px] text-stone-400 leading-relaxed">
+          داده‌های استایل و کمد شما تنها برای شخصی‌سازی ظاهر در همین دستگاه یا دیتابیس اختصاصی ذخیره می‌شوند.
+        </p>
+        <div className="flex gap-2">
+          <button
+            onClick={() => {
+              const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(dna, null, 2));
+              const downloadAnchor = document.createElement('a');
+              downloadAnchor.setAttribute("href", dataStr);
+              downloadAnchor.setAttribute("download", "ayna_beauty_dna.json");
+              document.body.appendChild(downloadAnchor);
+              downloadAnchor.click();
+              downloadAnchor.remove();
+            }}
+            className="flex-1 py-2 px-3 rounded-xl bg-stone-900 hover:bg-stone-800 border border-stone-700/60 text-stone-300 text-xs flex items-center justify-center gap-1.5 font-medium transition-colors"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>خروجی فایل JSON</span>
+          </button>
         </div>
       </div>
     </div>

@@ -27,12 +27,14 @@ import { compressImage } from '../../utils/imageCompressor';
 interface MakeItMineTabProps {
   onSaveLook: (look: SavedLook) => void;
   onNavigateTab: (tab: TabType) => void;
+  onOpenMixer?: () => void;
   savedLooks: SavedLook[];
 }
 
 export const MakeItMineTab: React.FC<MakeItMineTabProps> = ({
   onSaveLook,
   onNavigateTab,
+  onOpenMixer,
   savedLooks,
 }) => {
   const [selectedReference, setSelectedReference] = useState<any>(SAMPLE_REFERENCES[0]);
@@ -392,7 +394,7 @@ export const MakeItMineTab: React.FC<MakeItMineTabProps> = ({
           </div>
 
           {/* Closet matching */}
-          <div className="p-3 rounded-2xl bg-stone-950 border border-stone-800 space-y-1 text-xs">
+          <div className="p-3 rounded-2xl bg-stone-950 border border-stone-800 space-y-2 text-xs">
             <div className="flex items-center gap-1.5 text-stone-200 font-semibold">
               <Shirt className="w-3.5 h-3.5 text-teal-400" />
               <span>ترکیب با کمد تو:</span>
@@ -400,6 +402,22 @@ export const MakeItMineTab: React.FC<MakeItMineTabProps> = ({
             <p className="text-[11px] text-stone-400 leading-relaxed">
               {result.yourVersion.closetMatching}
             </p>
+            <div className="pt-1 flex gap-2">
+              <button
+                onClick={() => onNavigateTab('closet')}
+                className="flex-1 py-1.5 px-2.5 rounded-xl bg-stone-900 hover:bg-stone-850 border border-stone-800 text-[11px] text-teal-300 font-medium transition-colors text-center"
+              >
+                مشاهده کمد لباس‌ها
+              </button>
+              {onOpenMixer && (
+                <button
+                  onClick={onOpenMixer}
+                  className="flex-1 py-1.5 px-2.5 rounded-xl bg-teal-950/60 hover:bg-teal-900 border border-teal-800/60 text-[11px] text-teal-200 font-bold transition-colors text-center"
+                >
+                  استودیو ست کردن مانکن
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Final reassurance */}

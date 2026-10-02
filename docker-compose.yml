@@ -1,0 +1,41 @@
+services:
+  app:
+    build: .
+    container_name: ayna-app
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - APP_URL=${APP_URL}
+      - DATABASE_URL=postgresql://ayna_user:ayna_secure_password@postgres:5432/ayna_db
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - app_data:/app/data
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: ayna-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ayna_user
+      POSTGRES_PASSWORD: ayna_secure_password
+      POSTGRES_DB: ayna_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ayna_user -d ayna_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  app_data:
+  postgres_data:
