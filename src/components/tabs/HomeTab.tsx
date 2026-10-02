@@ -42,6 +42,12 @@ interface HomeTabProps {
   onOpenSmartShopping: () => void;
   onOpenPhotoCoach: () => void;
   onOpenExpressVibes: (mode: 'surprise' | 'cute' | 'refresh') => void;
+  onOpenSearch: () => void;
+  onOpenMakeupStudio: () => void;
+  onOpenHairStudio: () => void;
+  onOpenSkinProblemSolver: () => void;
+  onOpenBodyAccessories: () => void;
+  onOpenDailyChallenge: () => void;
 }
 
 export const HomeTab: React.FC<HomeTabProps> = ({
@@ -60,6 +66,12 @@ export const HomeTab: React.FC<HomeTabProps> = ({
   onOpenSmartShopping,
   onOpenPhotoCoach,
   onOpenExpressVibes,
+  onOpenSearch,
+  onOpenMakeupStudio,
+  onOpenHairStudio,
+  onOpenSkinProblemSolver,
+  onOpenBodyAccessories,
+  onOpenDailyChallenge,
 }) => {
   // Daily Check States
   const [energy, setEnergy] = useState<EnergyLevel>('medium');
@@ -181,6 +193,116 @@ export const HomeTab: React.FC<HomeTabProps> = ({
               </div>
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* Unified Search Quick Bar (جستجوی یکپارچه هوشمند) */}
+      <div
+        onClick={onOpenSearch}
+        className="p-3 rounded-2xl bg-stone-900 hover:bg-stone-850 border border-stone-800 hover:border-rose-900/60 transition-all cursor-pointer flex items-center justify-between shadow-xs group"
+      >
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-xl bg-stone-950 border border-stone-800 text-stone-400 group-hover:text-rose-300 flex items-center justify-center transition-colors">
+            <span className="text-sm">🔍</span>
+          </div>
+          <div>
+            <span className="text-xs font-bold text-stone-200 block group-hover:text-rose-200 transition-colors">
+              جستجو در تکنیک‌ها، مشکلات، استایل‌ها و مقالات...
+            </span>
+            <span className="text-[10px] text-stone-400 block mt-0.5">
+              مثلاً: «چشم افتاده»، «منافذ پوست»، «شال مونوکروم»، «جوش»
+            </span>
+          </div>
+        </div>
+        <span className="text-[10px] text-rose-300 bg-rose-950/80 border border-rose-800/60 px-2 py-0.5 rounded-full font-latin">
+          Search
+        </span>
+      </div>
+
+      {/* Specialized Studios Grid (استودیوهای ۵ گانه تخصصی) */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between px-1">
+          <h2 className="text-xs font-bold text-stone-200 flex items-center gap-1.5">
+            <span>استودیوهای تخصصی زیبایی و استایل</span>
+            <span className="text-[10px] text-rose-300 bg-rose-950/80 px-1.5 py-0.2 rounded font-latin">STUDIOS</span>
+          </h2>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+          {/* Studio 1: Makeup AI */}
+          <button
+            onClick={onOpenMakeupStudio}
+            className="p-3 rounded-2xl bg-stone-900 hover:bg-stone-850 border border-stone-800 hover:border-rose-800/60 text-right transition-all flex flex-col justify-between shadow-xs"
+          >
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-lg">💄</span>
+              <span className="text-[9px] text-rose-400 bg-rose-950/80 px-1.5 py-0.5 rounded font-latin">Makeup</span>
+            </div>
+            <div>
+              <span className="font-bold text-stone-200 block text-xs">استودیوی میکاپ AI</span>
+              <span className="text-[10px] text-stone-400 block mt-0.5">چشم، کانتور، لب و تینت</span>
+            </div>
+          </button>
+
+          {/* Studio 2: Hair Studio */}
+          <button
+            onClick={onOpenHairStudio}
+            className="p-3 rounded-2xl bg-stone-900 hover:bg-stone-850 border border-stone-800 hover:border-amber-800/60 text-right transition-all flex flex-col justify-between shadow-xs"
+          >
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-lg">💇‍♀️</span>
+              <span className="text-[9px] text-amber-400 bg-amber-950/80 px-1.5 py-0.5 rounded font-latin">Hair</span>
+            </div>
+            <div>
+              <span className="font-bold text-stone-200 block text-xs">استودیوی مو و شینیون</span>
+              <span className="text-[10px] text-stone-400 block mt-0.5">چتری، براشینگ و نجات وز</span>
+            </div>
+          </button>
+
+          {/* Studio 3: Skin Problem Solver */}
+          <button
+            onClick={onOpenSkinProblemSolver}
+            className="p-3 rounded-2xl bg-stone-900 hover:bg-stone-850 border border-stone-800 hover:border-teal-800/60 text-right transition-all flex flex-col justify-between shadow-xs"
+          >
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-lg">🧴</span>
+              <span className="text-[9px] text-teal-400 bg-teal-950/80 px-1.5 py-0.5 rounded font-latin">Skin Rescue</span>
+            </div>
+            <div>
+              <span className="font-bold text-stone-200 block text-xs">حل دغدغه‌های پوست</span>
+              <span className="text-[10px] text-stone-400 block mt-0.5">پوسته، جوش و ماسیدن کرم</span>
+            </div>
+          </button>
+
+          {/* Studio 4: Body & Accessories */}
+          <button
+            onClick={onOpenBodyAccessories}
+            className="p-3 rounded-2xl bg-stone-900 hover:bg-stone-850 border border-stone-800 hover:border-purple-800/60 text-right transition-all flex flex-col justify-between shadow-xs"
+          >
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-lg">👗</span>
+              <span className="text-[9px] text-purple-400 bg-purple-950/80 px-1.5 py-0.5 rounded font-latin">Body & Scarf</span>
+            </div>
+            <div>
+              <span className="font-bold text-stone-200 block text-xs">فرم بدن، اکسسوری و عطر</span>
+              <span className="text-[10px] text-stone-400 block mt-0.5">خطوط یقه و ۳ لوک با ۱ لباس</span>
+            </div>
+          </button>
+
+          {/* Studio 5: Daily Challenges */}
+          <button
+            onClick={onOpenDailyChallenge}
+            className="p-3 rounded-2xl bg-stone-900 hover:bg-stone-850 border border-stone-800 hover:border-emerald-800/60 text-right transition-all flex flex-col justify-between shadow-xs col-span-2 sm:col-span-1"
+          >
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-lg">🎯</span>
+              <span className="text-[9px] text-emerald-400 bg-emerald-950/80 px-1.5 py-0.5 rounded font-latin">Daily Challenge</span>
+            </div>
+            <div>
+              <span className="font-bold text-stone-200 block text-xs">چالش‌های روزانه و یادآورها</span>
+              <span className="text-[10px] text-stone-400 block mt-0.5">کشف تنوع استایل بدون استرس</span>
+            </div>
+          </button>
         </div>
       </div>
 

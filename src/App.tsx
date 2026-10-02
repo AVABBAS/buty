@@ -29,6 +29,11 @@ import { BeautyDefenseModal } from './components/modals/BeautyDefenseModal';
 import { SmartShoppingModal } from './components/modals/SmartShoppingModal';
 import { PhotoCoachModal } from './components/modals/PhotoCoachModal';
 import { ExpressVibesModal } from './components/modals/ExpressVibesModal';
+import { BeautySearchModal } from './components/modals/BeautySearchModal';
+import { MakeupHairStudioModal } from './components/modals/MakeupHairStudioModal';
+import { SkinProblemSolverModal } from './components/modals/SkinProblemSolverModal';
+import { BodyAccessoriesModal } from './components/modals/BodyAccessoriesModal';
+import { DailyChallengeModal } from './components/modals/DailyChallengeModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { safeStorage } from './utils/safeStorage';
 
@@ -71,6 +76,12 @@ export default function App() {
   const [isSmartShoppingOpen, setIsSmartShoppingOpen] = useState<boolean>(false);
   const [isPhotoCoachOpen, setIsPhotoCoachOpen] = useState<boolean>(false);
   const [expressVibeMode, setExpressVibeMode] = useState<'surprise' | 'cute' | 'refresh' | null>(null);
+  const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false);
+  const [isMakeupStudioOpen, setIsMakeupStudioOpen] = useState<boolean>(false);
+  const [isHairStudioOpen, setIsHairStudioOpen] = useState<boolean>(false);
+  const [isSkinProblemOpen, setIsSkinProblemOpen] = useState<boolean>(false);
+  const [isBodyAccessoriesOpen, setIsBodyAccessoriesOpen] = useState<boolean>(false);
+  const [isDailyChallengeOpen, setIsDailyChallengeOpen] = useState<boolean>(false);
   const [tgUserFirstName, setTgUserFirstName] = useState<string | undefined>();
   const [tgUserId, setTgUserId] = useState<string | undefined>();
 
@@ -182,13 +193,31 @@ export default function App() {
         isBeautyDefenseOpen ||
         isSmartShoppingOpen ||
         isPhotoCoachOpen ||
-        Boolean(expressVibeMode);
+        Boolean(expressVibeMode) ||
+        isSearchOpen ||
+        isMakeupStudioOpen ||
+        isHairStudioOpen ||
+        isSkinProblemOpen ||
+        isBodyAccessoriesOpen ||
+        isDailyChallengeOpen;
 
       if (isAnyModalOpen || currentTab !== 'home') {
         tg.BackButton.show();
 
         const handleBack = () => {
-          if (expressVibeMode) {
+          if (isSearchOpen) {
+            setIsSearchOpen(false);
+          } else if (isMakeupStudioOpen) {
+            setIsMakeupStudioOpen(false);
+          } else if (isHairStudioOpen) {
+            setIsHairStudioOpen(false);
+          } else if (isSkinProblemOpen) {
+            setIsSkinProblemOpen(false);
+          } else if (isBodyAccessoriesOpen) {
+            setIsBodyAccessoriesOpen(false);
+          } else if (isDailyChallengeOpen) {
+            setIsDailyChallengeOpen(false);
+          } else if (expressVibeMode) {
             setExpressVibeMode(null);
           } else if (isPhotoCoachOpen) {
             setIsPhotoCoachOpen(false);
@@ -248,6 +277,12 @@ export default function App() {
     isSmartShoppingOpen,
     isPhotoCoachOpen,
     expressVibeMode,
+    isSearchOpen,
+    isMakeupStudioOpen,
+    isHairStudioOpen,
+    isSkinProblemOpen,
+    isBodyAccessoriesOpen,
+    isDailyChallengeOpen,
   ]);
 
   const handleAddClosetItem = (item: ClosetItem) => {
@@ -311,6 +346,12 @@ export default function App() {
                 onOpenSmartShopping={() => setIsSmartShoppingOpen(true)}
                 onOpenPhotoCoach={() => setIsPhotoCoachOpen(true)}
                 onOpenExpressVibes={(mode) => setExpressVibeMode(mode)}
+                onOpenSearch={() => setIsSearchOpen(true)}
+                onOpenMakeupStudio={() => setIsMakeupStudioOpen(true)}
+                onOpenHairStudio={() => setIsHairStudioOpen(true)}
+                onOpenSkinProblemSolver={() => setIsSkinProblemOpen(true)}
+                onOpenBodyAccessories={() => setIsBodyAccessoriesOpen(true)}
+                onOpenDailyChallenge={() => setIsDailyChallengeOpen(true)}
               />
             )}
 
@@ -448,6 +489,47 @@ export default function App() {
               onSaveLook={handleSaveLook}
             />
           )}
+
+          <BeautySearchModal
+            isOpen={isSearchOpen}
+            onClose={() => setIsSearchOpen(false)}
+            onSelectAction={(category) => {
+              if (category === 'closet') setCurrentTab('closet');
+              else if (category === 'look') setIsMixerOpen(true);
+              else if (category === 'problem') setIsSkinProblemOpen(true);
+              else if (category === 'technique') setIsMakeupStudioOpen(true);
+              else if (category === 'wisdom') setCurrentTab('wisdom');
+            }}
+          />
+
+          <MakeupHairStudioModal
+            isOpen={isMakeupStudioOpen}
+            initialTab="makeup"
+            onClose={() => setIsMakeupStudioOpen(false)}
+          />
+
+          <MakeupHairStudioModal
+            isOpen={isHairStudioOpen}
+            initialTab="hair"
+            onClose={() => setIsHairStudioOpen(false)}
+          />
+
+          <SkinProblemSolverModal
+            isOpen={isSkinProblemOpen}
+            onClose={() => setIsSkinProblemOpen(false)}
+            onOpenRoutine={handleOpenRoutine}
+          />
+
+          <BodyAccessoriesModal
+            isOpen={isBodyAccessoriesOpen}
+            onClose={() => setIsBodyAccessoriesOpen(false)}
+            onOpenMixer={() => setIsMixerOpen(true)}
+          />
+
+          <DailyChallengeModal
+            isOpen={isDailyChallengeOpen}
+            onClose={() => setIsDailyChallengeOpen(false)}
+          />
         </div>
       </div>
     </ErrorBoundary>
