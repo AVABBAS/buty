@@ -1,0 +1,524 @@
+import express, { Request, Response } from 'express';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
+import { GoogleGenAI } from '@google/genai';
+
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+const isProd = process.env.NODE_ENV === 'production';
+
+// Support reasonable payload limits for compressed base64 images
+app.use(express.json({ limit: '10mb' }));
+
+// -------------------------------------------------------------
+// Server-Side In-Memory Cache (Essential for 50,000+ Users Scale)
+// -------------------------------------------------------------
+interface CacheItem {
+  data: any;
+  timestamp: number;
+}
+const cache = new Map<string, CacheItem>();
+const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes TTL
+const MAX_CACHE_SIZE = 1000;
+
+function getCached(key: string): any | null {
+  const item = cache.get(key);
+  if (!item) return null;
+  if (Date.now() - item.timestamp > CACHE_TTL_MS) {
+    cache.delete(key);
+    return null;
+  }
+  return item.data;
+}
+
+function setCached(key: string, data: any) {
+  if (cache.size >= MAX_CACHE_SIZE) {
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey) cache.delete(oldestKey);
+  }
+  cache.set(key, { data, timestamp: Date.now() });
+}
+
+// -------------------------------------------------------------
+// Gemini Initialization & Safe JSON Parser
+// -------------------------------------------------------------
+const apiKey = process.env.GEMINI_API_KEY;
+let ai: GoogleGenAI | null = null;
+if (apiKey) {
+  ai = new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
+    },
+  });
+}
+
+function safeParseJson(rawText: string | undefined, fallback: any): any {
+  if (!rawText) return fallback;
+  try {
+    // 1. Direct parse
+    return JSON.parse(rawText);
+  } catch {
+    // 2. Strip markdown fences ```json ... ```
+    try {
+      const cleaned = rawText
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .trim();
+      return JSON.parse(cleaned);
+    } catch {
+      // 3. Extract outermost { ... }
+      try {
+        const match = rawText.match(/\{[\s\S]*\}/);
+        if (match) {
+          return JSON.parse(match[0]);
+        }
+      } catch {
+        // Fallback to deterministic generator
+      }
+    }
+  }
+  return fallback;
+}
+
+// Helper with timeout to prevent hung connections
+async function generateWithTimeout(promise: Promise<any>, timeoutMs = 8000): Promise<any> {
+  let timer: any;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('AI generation timed out')), timeoutMs);
+  });
+  try {
+    const result = await Promise.race([promise, timeoutPromise]);
+    clearTimeout(timer);
+    return result;
+  } catch (err) {
+    clearTimeout(timer);
+    throw err;
+  }
+}
+
+// -------------------------------------------------------------
+// Fallback Generators (High quality deterministic Persian models)
+// -------------------------------------------------------------
+function generateFallbackMakeItMine(description: string, vibe: string, context?: any) {
+  return {
+    referenceAnalysis: {
+      silhouette: 'سیلوئت مدرن، تمیز با تعادل میان راحتی و آراستگی بصری',
+      vibe: vibe || 'Elegant & Modern Chic',
+      colors: ['نود گرم', 'مشکی کربن', 'کرم شنی', 'رز ملایم'],
+      makeupFocus: 'پوست طبیعی و درخشان (Skin-first)، ابروهای شانه شده طبیعی، رژ لب نود براق یا تینت محو',
+      hairStyle: 'موج‌های لطیف باز یا بسته مرتب بدون حالت خشک و مصنوعی',
+      keyAccessories: ['کیف دوشی مینیمال', 'گوشواره حلقه‌ای ظریف یا استیتمنت ملایم', 'شال هماهنگ لایت']
+    },
+    yourVersion: {
+      title: 'نسخه شخصی‌سازی شده شما (Make It Mine)',
+      coreAdvice: 'به جای کپی کردن دقیق متریال گران‌قیمت یا مدل خاص، روح و ریتم لوک را با ویژگی‌های خودت بازآفرینی می‌کنیم.',
+      steps: [
+        {
+          step: 1,
+          part: 'پوست و آرایش',
+          action: 'یک مرطوب‌کننده سبک + ضدآفتاب رنگی یا تینت. خط چشم دودی باریک در گوشه خارجی و بلاش هلویی ملایم روی برجستگی گونه.'
+        },
+        {
+          step: 2,
+          part: 'موها',
+          action: 'فرق از وسط یا بغل دلخواه؛ با چند قطره سرم ضد وز یا باز گذاشتن با بافت طبیعی خودت.'
+        },
+        {
+          step: 3,
+          part: 'استایل با چیزهایی که داری',
+          action: 'کت یا مانتوی اورسایز رنگ خنثی با شلوار راسته تیره و کفش لوفر یا کتانی تمیز. شال یا روسری را سبک آزاد دور گردن بینداز.'
+        }
+      ],
+      closetMatching: 'کافیست یک بالاتنه مونوکروم و اکسسوری متالیک ظریف از کمد خودت انتخاب کنی.',
+      finalWord: 'این لوک امضای خودته؛ زیبا و آماده!'
+    }
+  };
+}
+
+function generateFallbackTriage(problem: string, context: string) {
+  return {
+    headline: 'آرام باش؛ این اولویت‌بندی دقیق برای وضعیت فعلی توئه:',
+    priority1: {
+      title: 'الان مهم‌ترین (همین ۲ دقیقه)',
+      action: 'روی یک کار ملموس تمرکز کن: اگر موها به‌هم ریخته است، یک دم‌اسبی شیک یا کلیپس مینیمال؛ اگر پوست خسته است، یک آب‌رسان و مرطوب‌کننده.'
+    },
+    priority2: {
+      title: 'کار بعدی (اگر ۵ دقیقه وقت داری)',
+      action: 'یک رژ لب شاداب یا تینت روی لب و گونه + مرتب کردن فرم ابرو با ژل بی‌رنگ.'
+    },
+    priority3: {
+      title: 'اگر وقت ماند',
+      action: 'یک اکسسوری کوچک (گوشواره یا ساعت) بردار و عطر همیشگی‌ات را بزن.'
+    },
+    reassuranceNote: 'بقیه جزئیات اصلاً دیده نمیشن. با همین‌ها کاملاً آماده و مسلط هستی. حالا آینه رو ببند!'
+  };
+}
+
+function generateFallbackSecondOpinion(optionA: string, optionB: string, context: string) {
+  return {
+    optionA_analysis: {
+      name: optionA || 'گزینه اول',
+      vibe: 'رسمی‌تر، ساختاریافته و باوقار',
+      impression: 'حس تسلط و تمرکز بالا را منتقل می‌کند؛ مناسب فضاهای کاری، قرارهای جدی یا محیط‌هایی که رسمیت مهم است.'
+    },
+    optionB_analysis: {
+      name: optionB || 'گزینه دوم',
+      vibe: 'صمیمی‌تر، لطیف، آزاد و پرانرژی',
+      impression: 'حس سبکی، راحتی و صمیمیت بدون زحمت را القا می‌کند؛ مناسب دورهمی، قرارهای دوستانه یا محیط غیررسمی.'
+    },
+    verdict: `اگر برای ${context || 'این موقعیت'} حس اعتمادبه‌نفس و راحتی طبیعی می‌خواهی، انتخابی را بردار که موقع راه‌رفتن یا صحبت‌کردن به تنظیم مداوم نیاز ندارد.`
+  };
+}
+
+// -------------------------------------------------------------
+// Scalable AI API Endpoints with Caching & Resilience
+// -------------------------------------------------------------
+
+// 1. Make It Mine
+app.post('/api/ai/make-it-mine', async (req: Request, res: Response) => {
+  try {
+    const { prompt, vibe, photoBase64, userDna } = req.body;
+    const cacheKey = `mim:${prompt || ''}:${vibe || ''}:${photoBase64 ? 'photo' : 'no'}`;
+
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
+
+    if (!ai) {
+      const fb = generateFallbackMakeItMine(prompt || 'استایل شیک', vibe, userDna);
+      setCached(cacheKey, fb);
+      return res.json(fb);
+    }
+
+    const systemInstruction = `تو مغز متفکر مینیاپ زیبایی «آینـا» هستی. اصل راهنما: «هر چیزی که خوشت میاد، نسخه مناسب خودت رو بساز.» و «با چیزهایی که داری شروع کن».
+پاسخ در فرمت JSON بدون هیچ مارک‌داون یا توضیح اضافه:
+{
+  "referenceAnalysis": {
+    "silhouette": "توصیف سیلوئت و استراکچر",
+    "vibe": "وایب کلی",
+    "colors": ["رنگ ۱", "رنگ ۲", "رنگ ۳"],
+    "makeupFocus": "تمرکز آرایش",
+    "hairStyle": "فرم مو",
+    "keyAccessories": ["اکسسوری ۱", "اکسسوری ۲"]
+  },
+  "yourVersion": {
+    "title": "عنوان نسخه شخصی تو",
+    "coreAdvice": "توضیح کوتاه چطور این سبک به تو میاد",
+    "steps": [
+      { "step": 1, "part": "پوست و آرایش", "action": "کار مشخص" },
+      { "step": 2, "part": "موها", "action": "کار مشخص" },
+      { "step": 3, "part": "استایل با داشته‌های کمد", "action": "کار مشخص" }
+    ],
+    "closetMatching": "پیشنهاد ترکیب با لباس‌های کمد",
+    "finalWord": "یک جمله دلگرم‌کننده و تمام‌کننده"
+  }
+}`;
+
+    const parts: any[] = [];
+    if (photoBase64) {
+      const mimeMatch = photoBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,/);
+      const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+      const cleanBase64 = photoBase64.replace(/^data:[a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+;base64,/, '');
+      parts.push({
+        inlineData: {
+          mimeType,
+          data: cleanBase64
+        }
+      });
+    }
+
+    const userContent = `کاربر این رفرنس را ارائه داده است: "${prompt || 'استایل خاص'}".
+وایب مورد نظر: "${vibe || 'متعادل'}".
+مشخصات و ترجیحات کاربر: ${JSON.stringify(userDna || {})}.
+لطفاً این تصویر/رفرنس را آنالیز کن و نسخه اختصاصی خود او را تولید کن.`;
+
+    parts.push({ text: userContent });
+
+    const response = await generateWithTimeout(
+      ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: parts.length === 1 ? parts[0].text : { parts },
+        config: {
+          systemInstruction,
+          responseMimeType: 'application/json',
+        }
+      })
+    );
+
+    const parsed = safeParseJson(response.text, generateFallbackMakeItMine(prompt, vibe, userDna));
+    setCached(cacheKey, parsed);
+    return res.json(parsed);
+  } catch (error) {
+    console.error('Make It Mine error:', error);
+    return res.json(generateFallbackMakeItMine(req.body.prompt, req.body.vibe, req.body.userDna));
+  }
+});
+
+// 2. AI Triage & SOS Solver
+app.post('/api/ai/triage', async (req: Request, res: Response) => {
+  try {
+    const { problem, context, category } = req.body;
+    const cacheKey = `trg:${category || ''}:${problem || ''}`;
+
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
+
+    if (!ai) {
+      const fb = generateFallbackTriage(problem, context);
+      setCached(cacheKey, fb);
+      return res.json(fb);
+    }
+
+    const promptText = `کاربر در وضعیت آشفتگی یا مشکل زیبایی است:
+دسته‌بندی: ${category || 'عمومی'}
+مشکل مطرح شده: "${problem}"
+موقعیت / زمان: "${context || 'فوری'}"
+
+تو دستیار هوشمند «آینـا» هستی. اصل:
+1. الان مهم‌ترین
+2. بعدی
+3. اگر وقت ماند
+پاسخ در فرمت JSON معتبر:
+{
+  "headline": "جمله آرامش‌بخش و متمرکز",
+  "priority1": { "title": "الان مهم‌ترین", "action": "اقدام اول در ۲ دقیقه" },
+  "priority2": { "title": "کار بعدی", "action": "اقدام دوم در ۳ دقیقه" },
+  "priority3": { "title": "اگر وقت ماند", "action": "اقدام تکمیلی اختیاری" },
+  "reassuranceNote": "پیام پایانی برای بستن آینه و متوقف کردن چک کردن مکرر"
+}`;
+
+    const response = await generateWithTimeout(
+      ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: promptText,
+        config: {
+          responseMimeType: 'application/json',
+        }
+      })
+    );
+
+    const parsed = safeParseJson(response.text, generateFallbackTriage(problem, context));
+    setCached(cacheKey, parsed);
+    return res.json(parsed);
+  } catch (error) {
+    console.error('Triage error:', error);
+    return res.json(generateFallbackTriage(req.body.problem, req.body.context));
+  }
+});
+
+// 3. Second Opinion
+app.post('/api/ai/second-opinion', async (req: Request, res: Response) => {
+  try {
+    const { optionA, optionB, context } = req.body;
+    const cacheKey = `so:${optionA}:${optionB}:${context}`;
+
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
+
+    if (!ai) {
+      const fb = generateFallbackSecondOpinion(optionA, optionB, context);
+      setCached(cacheKey, fb);
+      return res.json(fb);
+    }
+
+    const promptText = `کاربر بین دو انتخاب مردد است:
+گزینه ۱: "${optionA}"
+گزینه ۲: "${optionB}"
+موقعیت: "${context || 'مهمانی یا کار'}"
+
+قانون: هرگز نگو کدام زیباتر است؛ تفاوت‌های توصیفی، حس منتقل شده و پیام بصری هر دو را به فارسی بگو.
+فرمت JSON:
+{
+  "optionA_analysis": {
+    "name": "نام گزینه اول",
+    "vibe": "وایب و حس اصلی",
+    "impression": "توصیف بصری و تأثیر روی دیگران"
+  },
+  "optionB_analysis": {
+    "name": "نام گزینه دوم",
+    "vibe": "وایب و حس اصلی",
+    "impression": "توصیف بصری و تأثیر روی دیگران"
+  },
+  "verdict": "توصیه بر اساس راحتی و هدف کاربر"
+}`;
+
+    const response = await generateWithTimeout(
+      ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: promptText,
+        config: {
+          responseMimeType: 'application/json',
+        }
+      })
+    );
+
+    const parsed = safeParseJson(response.text, generateFallbackSecondOpinion(optionA, optionB, context));
+    setCached(cacheKey, parsed);
+    return res.json(parsed);
+  } catch (error) {
+    console.error('Second Opinion error:', error);
+    return res.json(generateFallbackSecondOpinion(req.body.optionA, req.body.optionB, req.body.context));
+  }
+});
+
+// 4. Today Plan & Glow Up Generator
+app.post('/api/ai/today-plan', async (req: Request, res: Response) => {
+  try {
+    const { energy, mood, timeMinutes, occasion, userDna } = req.body;
+    const timeNum = parseInt(timeMinutes) || 10;
+    const cacheKey = `tp:${energy}:${mood}:${timeNum}:${occasion}`;
+
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
+
+    if (!ai) {
+      const fallback = {
+        title: `برنامه درخشش ${timeNum} دقیقه‌ای امروز`,
+        vibeSummary: `تنظیم شده برای انرژی ${energy || 'متوسط'}، حس ${mood || 'عادی'} و موقعیت ${occasion || 'روزمره'}`,
+        actions: [
+          { time: '۲ دقیقه', title: 'احیای پوست', desc: 'اسپری آب یا مرطوب‌کننده ملایم + ضدآفتاب' },
+          { time: `${Math.max(2, Math.floor(timeNum / 2))} دقیقه`, title: 'استایل مو و چهره', desc: 'شانه کردن ابرو، یک تینت خوش‌رنگ روی لب و جمع کردن شیک موها' },
+          { time: '۲ دقیقه', title: 'تنظیم لباس و شال', desc: 'هماهنگ کردن شال یا گوشواره با رنگ کفش/کیف' }
+        ],
+        goodEnoughMessage: 'همین سه مرحله کافیه؛ لازم نیست دوباره خودت رو توی آینه چک کنی. عالی شدی!'
+      };
+      setCached(cacheKey, fallback);
+      return res.json(fallback);
+    }
+
+    const promptText = `برای مینیاپ آینا یک برنامه آماده‌سازی سریع و واقع‌گرایانه بساز:
+انرژی: ${energy}
+مود: ${mood}
+زمان موجود: ${timeMinutes} دقیقه
+موقعیت: ${occasion}
+دی‌ان‌ای استایل کاربر: ${JSON.stringify(userDna || {})}
+
+اصل: Minimum Effort + Visible Result + Personalization.
+فرمت JSON:
+{
+  "title": "عنوان جذاب برنامه",
+  "vibeSummary": "خلاصه حس برنامه",
+  "actions": [
+    { "time": "مدت دقیقه", "title": "عنوان کار", "desc": "توضیح کوتاه و دقیق اقدام" }
+  ],
+  "goodEnoughMessage": "جمله پایانی: بقیه رو بیخیال شو، آماده‌ای!"
+}`;
+
+    const response = await generateWithTimeout(
+      ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: promptText,
+        config: {
+          responseMimeType: 'application/json',
+        }
+      })
+    );
+
+    const parsed = safeParseJson(response.text, {
+      title: 'برنامه درخشش سریع امروز',
+      vibeSummary: 'ساده، مؤثر و متمرکز',
+      actions: [
+        { time: '۲ دقیقه', title: 'طراوت چهره', desc: 'مرطوب‌کننده و ماساژ سبک ۳۰ ثانیه‌ای گونه‌ها' },
+        { time: '۵ دقیقه', title: 'میکاپ ملایم', desc: 'ژل ابرو، ریمل ملایم و رژ نود' },
+        { time: '۳ دقیقه', title: 'اکسسوری کلیدی', desc: 'انتخاب یک گوشواره یا ساعت شاخص' }
+      ],
+      goodEnoughMessage: 'آماده‌ای! از روزت لذت ببر.'
+    });
+
+    setCached(cacheKey, parsed);
+    return res.json(parsed);
+  } catch (error) {
+    console.error('Today Plan error:', error);
+    return res.json({
+      title: 'برنامه درخشش سریع امروز',
+      vibeSummary: 'ساده، مؤثر و متمرکز',
+      actions: [
+        { time: '۲ دقیقه', title: 'طراوت چهره', desc: 'مرطوب‌کننده و ماساژ سبک ۳۰ ثانیه‌ای گونه‌ها' },
+        { time: '۵ دقیقه', title: 'میکاپ ملایم', desc: 'ژل ابرو، ریمل ملایم و رژ نود' },
+        { time: '۳ دقیقه', title: 'اکسسوری کلیدی', desc: 'انتخاب یک گوشواره یا ساعت شاخص' }
+      ],
+      goodEnoughMessage: 'آماده‌ای! از روزت لذت ببر.'
+    });
+  }
+});
+
+// 5. Coach Chat (Empathetic Beauty Companion)
+app.post('/api/ai/coach', async (req: Request, res: Response) => {
+  try {
+    const { message, history } = req.body;
+
+    if (!ai) {
+      return res.json({
+        reply: `پیامت رو خوندم: «${message}». یادت باشه زیبایی یک مسابقه یا آزمون نیست؛ قراره ابزاری باشه که حس بهتری با خودت داشته باشی. چه کاری هست که بتونیم با چیزهایی که همین الان داری و در کمترین زمان انجام بدیم؟`
+      });
+    }
+
+    const systemInstruction = `تو هوش مصنوعی مشاور و رفیق زیبایی «آینـا» هستی.
+ویژگی‌های کلیدی لحن تو:
+- صمیمی، حامی، بدون قضاوت و آرامش‌بخش
+- هرگز اجازه نده کاربر وارد چرخه اطمینان‌طلبی بیمارگونه (Reassurance seeking) یا چک کردن مداوم آینه شود
+- هرگز امتیاز زیبایی نده
+- بدن یا ظاهر را نقص‌دار نخوان
+- تمرکز روی «با چیزهایی که داری چه کار کنیم» و «کِی دیگه کافیه»
+- کوتاه، گزیده و عملیاتی به زبان فارسی پاسخ بده`;
+
+    const contents = [];
+    if (Array.isArray(history)) {
+      for (const h of history.slice(-6)) {
+        contents.push({ role: h.role === 'user' ? 'user' : 'model', parts: [{ text: h.text }] });
+      }
+    }
+    contents.push({ role: 'user', parts: [{ text: message }] });
+
+    const response = await generateWithTimeout(
+      ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents,
+        config: {
+          systemInstruction,
+        }
+      }),
+      7000
+    );
+
+    return res.json({ reply: response.text });
+  } catch (error) {
+    console.error('Coach Chat error:', error);
+    return res.json({
+      reply: 'من اینجام تا کمکت کنم. به جای وسواس روی جزئیات، بیا روی ۱ حرکت موثر که امروز بهت حس شادابی میده تمرکز کنیم.'
+    });
+  }
+});
+
+// -------------------------------------------------------------
+// Vite Middleware / Static Serving
+// -------------------------------------------------------------
+async function startServer() {
+  if (!isProd) {
+    const { createServer: createViteServer } = await import('vite');
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    app.use(express.static(path.resolve(__dirname, 'dist'), { maxAge: '1h' }));
+    app.get('*', (req: Request, res: Response) => {
+      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
+    });
+  }
+
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT} in ${isProd ? 'production' : 'development'} mode (Cached & Scalable)`);
+  });
+}
+
+startServer();

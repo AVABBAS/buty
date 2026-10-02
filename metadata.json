@@ -1,0 +1,6 @@
+{
+  "name": "آینـا | دستیار شخصی زیبایی و استایل",
+  "description": "دستیار هوشمند و شخصی زیبایی و استایل برای تلگرام؛ بفهم چی بهت میاد، نسخه مناسب خودت رو بساز و با چیزهایی که داری بدرخش.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

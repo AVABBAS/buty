@@ -1,0 +1,467 @@
+import React, { useState } from 'react';
+import {
+  Sparkles,
+  Clock,
+  Battery,
+  Smile,
+  CheckCircle2,
+  ArrowRight,
+  Shirt,
+  Wand2,
+  AlertCircle,
+  ShieldCheck,
+  Check,
+  Compass,
+  Play,
+  Layers,
+  Scale,
+  Camera,
+  Heart,
+  Flame,
+  ChevronRight,
+  Award
+} from 'lucide-react';
+import { EnergyLevel, MoodType, TimeOption, TabType, TodayPlanResult } from '../../types';
+import { WISDOM_QUOTES } from '../../data/beautyKnowledge';
+import { requestTodayPlan } from '../../services/api';
+import { sounds } from '../../utils/soundEffects';
+
+interface HomeTabProps {
+  onNavigateTab: (tab: TabType, extraState?: any) => void;
+  onOpenGoodEnough: () => void;
+  onOpenCoach: () => void;
+  onOpenScanner: () => void;
+  onOpenRoutine: (time: number) => void;
+  onOpenMixer: () => void;
+  onOpenSecondOpinion: () => void;
+}
+
+export const HomeTab: React.FC<HomeTabProps> = ({
+  onNavigateTab,
+  onOpenGoodEnough,
+  onOpenCoach,
+  onOpenScanner,
+  onOpenRoutine,
+  onOpenMixer,
+  onOpenSecondOpinion,
+}) => {
+  // Daily Check States
+  const [energy, setEnergy] = useState<EnergyLevel>('medium');
+  const [mood, setMood] = useState<MoodType>('good');
+  const [timeMinutes, setTimeMinutes] = useState<TimeOption>(10);
+  const [occasion, setOccasion] = useState<string>('روزمره / کار');
+  const [isLoadingPlan, setIsLoadingPlan] = useState<boolean>(false);
+  const [todayPlan, setTodayPlan] = useState<TodayPlanResult | null>({
+    title: 'برنامه درخشش ۱۰ دقیقه‌ای امروز',
+    vibeSummary: 'طراحی شده برای حس شاداب، انرژی متعادل و استایل آراسته',
+    actions: [
+      { time: '۲ دقیقه', title: 'طراوت و آبرسانی پوست', desc: 'شستشوی ملایم صورت با آب خنک، مرطوب‌کننده سبک و ضدآفتاب بدون رد سفیدی', done: false },
+      { time: '۵ دقیقه', title: 'میکاپ سبک و شاداب', desc: 'شانه کردن ابروها با ژل بی‌رنگ + چند ضربه تینت هلویی روی سیب گونه و مرکز لب', done: false },
+      { time: '۳ دقیقه', title: 'مو و استایل شال', desc: 'جمع کردن مو با کلیپس مینیمال یا رها کردن موج‌های طبیعی + تنظیم شال رنگ کرم/شنی با شومیز', done: false }
+    ],
+    goodEnoughMessage: 'همین سه مرحله کافیه؛ بیشتر دستکاری نکن. آماده‌ای و عالی شدی!'
+  });
+
+  const [wisdomIndex, setWisdomIndex] = useState(0);
+  const [challengeDone, setChallengeDone] = useState(false);
+
+  const moodsList: Array<{ id: MoodType; label: string; emoji: string }> = [
+    { id: 'calm', label: 'آرام', emoji: '😌' },
+    { id: 'good', label: 'خوب', emoji: '🙂' },
+    { id: 'tired', label: 'خسته', emoji: '😴' },
+    { id: 'stressed', label: 'تحت فشار', emoji: '😣' },
+    { id: 'creative', label: 'خلاق', emoji: '🎨' },
+    { id: 'low', label: 'بی‌حوصله', emoji: '😔' },
+  ];
+
+  const occasionsList = [
+    'روزمره / کار',
+    'دانشگاه و درس',
+    'قرار و دورهمی',
+    'مهمانی و جشن',
+    'خونه و استراحت',
+    'عکاسی و استوری',
+    'روزهای پریود و کم‌انرژی'
+  ];
+
+  const handleGenerateTodayPlan = async () => {
+    sounds.playChime('click');
+    setIsLoadingPlan(true);
+    try {
+      const plan = await requestTodayPlan(energy, mood, timeMinutes, occasion);
+      setTodayPlan(plan);
+      sounds.playChime('step');
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsLoadingPlan(false);
+    }
+  };
+
+  const toggleActionDone = (index: number) => {
+    if (!todayPlan) return;
+    sounds.playChime('step');
+    const newActions = [...todayPlan.actions];
+    newActions[index].done = !newActions[index].done;
+    setTodayPlan({ ...todayPlan, actions: newActions });
+    if (window.Telegram?.WebApp?.HapticFeedback) {
+      window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
+    }
+  };
+
+  return (
+    <div className="space-y-4 pb-20">
+      {/* Luxury Editorial Hero Card */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-stone-900 via-stone-950 to-stone-900 border border-stone-800 p-5 text-stone-100 shadow-xl">
+        <div className="absolute -top-16 -left-16 w-48 h-48 bg-rose-400/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-16 -right-16 w-48 h-48 bg-amber-400/10 rounded-full blur-3xl pointer-events-none" />
+        
+        <div className="relative z-10 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-medium text-amber-300 tracking-wider font-latin uppercase">
+              AYNA PERSONAL ASSISTANT
+            </span>
+            <button
+              onClick={onOpenGoodEnough}
+              className="text-[11px] bg-rose-950/70 hover:bg-rose-900 text-rose-200 border border-rose-800/60 px-3 py-1 rounded-full transition-colors flex items-center gap-1 shadow-xs"
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>کافیه! (Good Enough)</span>
+            </button>
+          </div>
+
+          <h1 className="text-lg font-bold leading-snug text-stone-50">
+            «هر چیزی که خوشت میاد، نسخه مناسب خودت رو بساز.»
+          </h1>
+          <p className="text-xs text-stone-300 leading-relaxed max-w-sm">
+            ببین چی به تو میاد، با چیزهایی که داری شروع کن و فقط چیزهایی رو انتخاب کن که واقعاً لازم داری.
+          </p>
+
+          {/* Interactive Feature Hero Buttons */}
+          <div className="pt-2 grid grid-cols-2 gap-2">
+            <button
+              onClick={onOpenScanner}
+              className="p-2.5 rounded-2xl bg-gradient-to-r from-amber-500/20 to-rose-500/20 hover:from-amber-500/30 hover:to-rose-500/30 border border-amber-500/40 text-stone-100 flex items-center gap-2.5 transition-all group"
+            >
+              <div className="w-8 h-8 rounded-xl bg-amber-500/30 text-amber-200 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                <Camera className="w-4 h-4" />
+              </div>
+              <div className="text-right">
+                <span className="text-xs font-bold block text-stone-100">آینه و اسکن چهره</span>
+                <span className="text-[10px] text-amber-300/90 block">تحلیل هندسه و آندرتون</span>
+              </div>
+            </button>
+
+            <button
+              onClick={() => onOpenRoutine(timeMinutes)}
+              className="p-2.5 rounded-2xl bg-gradient-to-r from-rose-500/20 to-pink-500/20 hover:from-rose-500/30 hover:to-pink-500/30 border border-rose-500/40 text-stone-100 flex items-center gap-2.5 transition-all group"
+            >
+              <div className="w-8 h-8 rounded-xl bg-rose-500/30 text-rose-200 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                <Play className="w-4 h-4 fill-current ml-0.5" />
+              </div>
+              <div className="text-right">
+                <span className="text-xs font-bold block text-stone-100">پلیر زنده روتین</span>
+                <span className="text-[10px] text-rose-300/90 block">تایمر صوتی {timeMinutes} دقیقه‌ای</span>
+              </div>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* "امروز چی می‌خوای؟" Problem-First Direct Grid */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between px-1">
+          <h2 className="text-xs font-bold text-stone-200 flex items-center gap-1.5">
+            <span>امروز چی می‌خوای؟</span>
+            <span className="text-[10px] text-stone-400 font-normal">کلیک مستقیم</span>
+          </h2>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          {/* Option 1: Make It Mine */}
+          <button
+            onClick={() => onNavigateTab('make-it-mine')}
+            className="flex flex-col text-right p-3 rounded-2xl bg-stone-900 hover:bg-stone-850 border border-stone-800 hover:border-rose-900/60 transition-all group shadow-xs"
+          >
+            <div className="w-7 h-7 rounded-xl bg-rose-950 text-rose-300 flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform">
+              <Wand2 className="w-4 h-4" />
+            </div>
+            <span className="text-xs font-bold text-stone-200">📸 این عکس رو برام بساز</span>
+            <span className="text-[10px] text-stone-400 mt-0.5">تبدیل ترند اینستاگرام به نسخه خودت</span>
+          </button>
+
+          {/* Option 2: Outfit Mixer */}
+          <button
+            onClick={onOpenMixer}
+            className="flex flex-col text-right p-3 rounded-2xl bg-stone-900 hover:bg-stone-850 border border-stone-800 hover:border-teal-900/60 transition-all group shadow-xs"
+          >
+            <div className="w-7 h-7 rounded-xl bg-teal-950 text-teal-300 flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform">
+              <Layers className="w-4 h-4" />
+            </div>
+            <span className="text-xs font-bold text-stone-200">👗 استودیو ست کردن لباس</span>
+            <span className="text-[10px] text-stone-400 mt-0.5">ست زنده مانکن کمد و سنجش هارمونی</span>
+          </button>
+
+          {/* Option 3: Second Opinion Duel */}
+          <button
+            onClick={onOpenSecondOpinion}
+            className="flex flex-col text-right p-3 rounded-2xl bg-stone-900 hover:bg-stone-850 border border-stone-800 hover:border-amber-900/60 transition-all group shadow-xs"
+          >
+            <div className="w-7 h-7 rounded-xl bg-amber-950 text-amber-300 flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform">
+              <Scale className="w-4 h-4" />
+            </div>
+            <span className="text-xs font-bold text-stone-200">⚖️ دوئل استایل (A vs B)</span>
+            <span className="text-[10px] text-stone-400 mt-0.5">اسلایدر مقایسه تصویری دو انتخاب</span>
+          </button>
+
+          {/* Option 4: Beauty SOS */}
+          <button
+            onClick={() => onNavigateTab('sos')}
+            className="flex flex-col text-right p-3 rounded-2xl bg-stone-900 hover:bg-stone-850 border border-stone-800 hover:border-red-900/60 transition-all group shadow-xs"
+          >
+            <div className="w-7 h-7 rounded-xl bg-red-950 text-red-300 flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform">
+              <AlertCircle className="w-4 h-4" />
+            </div>
+            <span className="text-xs font-bold text-stone-200">🆘 بحران زیبایی / تریـاژ</span>
+            <span className="text-[10px] text-stone-400 mt-0.5">جوش، وز مو، ماسیدن آرایش، کلافگی</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Interactive Daily Context ("امروز چطوری؟") */}
+      <div className="rounded-3xl bg-stone-900 border border-stone-800 p-4 space-y-3.5 shadow-md">
+        <div className="flex items-center justify-between border-b border-stone-800/80 pb-2.5">
+          <div>
+            <h3 className="text-xs font-bold text-stone-100">امروز چطوری؟ (Personalized Context)</h3>
+            <p className="text-[10px] text-stone-400 mt-0.5">تنظیم اقدامات دقیق بر اساس انرژی و زمان واقعی‌ات</p>
+          </div>
+          <span className="text-[10px] text-amber-300 bg-amber-950/80 px-2 py-0.5 rounded-full border border-amber-800/50">
+            Smart Check
+          </span>
+        </div>
+
+        {/* 1. Energy */}
+        <div className="space-y-1.5">
+          <label className="text-[11px] text-stone-300 flex items-center gap-1.5 font-medium">
+            <Battery className="w-3.5 h-3.5 text-amber-300" />
+            <span>سطح انرژی‌ات:</span>
+          </label>
+          <div className="grid grid-cols-3 gap-1.5">
+            {[
+              { id: 'low' as EnergyLevel, label: 'کم و خسته 🔋' },
+              { id: 'medium' as EnergyLevel, label: 'معمولی 🟡' },
+              { id: 'high' as EnergyLevel, label: 'پرانرژی ⚡' },
+            ].map((item) => (
+              <button
+                key={item.id}
+                onClick={() => {
+                  setEnergy(item.id);
+                  sounds.playChime('click');
+                }}
+                className={`py-2 text-[11px] rounded-xl border transition-all ${
+                  energy === item.id
+                    ? 'bg-rose-950/70 border-rose-500 text-rose-200 font-bold shadow-xs'
+                    : 'bg-stone-950 border-stone-800 text-stone-400 hover:text-stone-200'
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 2. Mood */}
+        <div className="space-y-1.5">
+          <label className="text-[11px] text-stone-300 flex items-center gap-1.5 font-medium">
+            <Smile className="w-3.5 h-3.5 text-rose-300" />
+            <span>حس و حال الانت:</span>
+          </label>
+          <div className="grid grid-cols-3 gap-1.5">
+            {moodsList.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => {
+                  setMood(m.id);
+                  sounds.playChime('click');
+                }}
+                className={`py-1.5 px-1 text-[11px] rounded-xl border flex items-center justify-center gap-1 transition-all ${
+                  mood === m.id
+                    ? 'bg-rose-950/70 border-rose-500 text-rose-200 font-bold shadow-xs'
+                    : 'bg-stone-950 border-stone-800 text-stone-400 hover:text-stone-200'
+                }`}
+              >
+                <span>{m.emoji}</span>
+                <span>{m.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 3. Time Available */}
+        <div className="space-y-1.5">
+          <label className="text-[11px] text-stone-300 flex items-center gap-1.5 font-medium">
+            <Clock className="w-3.5 h-3.5 text-blue-300" />
+            <span>چقدر وقت داری؟</span>
+          </label>
+          <div className="grid grid-cols-4 gap-1.5">
+            {([3, 10, 20, 45] as TimeOption[]).map((t) => (
+              <button
+                key={t}
+                onClick={() => {
+                  setTimeMinutes(t);
+                  sounds.playChime('click');
+                }}
+                className={`py-1.5 text-[11px] rounded-xl border transition-all ${
+                  timeMinutes === t
+                    ? 'bg-rose-950/70 border-rose-500 text-rose-200 font-bold shadow-xs'
+                    : 'bg-stone-950 border-stone-800 text-stone-400 hover:text-stone-200'
+                }`}
+              >
+                {t} دقیقه
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 4. Occasion */}
+        <div className="space-y-1.5">
+          <label className="text-[11px] text-stone-300 flex items-center gap-1.5 font-medium">
+            <Compass className="w-3.5 h-3.5 text-emerald-300" />
+            <span>موقعیت و مقصد:</span>
+          </label>
+          <select
+            value={occasion}
+            onChange={(e) => setOccasion(e.target.value)}
+            className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3 py-2 text-xs text-stone-200 focus:outline-none focus:border-rose-500"
+          >
+            {occasionsList.map((occ) => (
+              <option key={occ} value={occ}>
+                {occ}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Generate Button */}
+        <div className="flex gap-2 pt-1">
+          <button
+            onClick={handleGenerateTodayPlan}
+            disabled={isLoadingPlan}
+            className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-rose-500 via-rose-600 to-amber-500 hover:from-rose-600 hover:to-amber-600 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5 disabled:opacity-60"
+          >
+            {isLoadingPlan ? (
+              <span className="flex items-center gap-2">
+                <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                در حال طراحی برنامه امروز...
+              </span>
+            ) : (
+              <>
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>بروزرسانی برنامه ({timeMinutes} دقیقه)</span>
+              </>
+            )}
+          </button>
+
+          {/* Launch Live Routine Player */}
+          <button
+            onClick={() => onOpenRoutine(timeMinutes)}
+            className="px-3.5 py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-amber-300 border border-amber-500/30 text-xs font-semibold flex items-center gap-1 shrink-0"
+            title="اجرای زنده با تایمر صوتی"
+          >
+            <Play className="w-3.5 h-3.5 fill-current" />
+            <span>تایمر زنده</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Generated Today Plan Card */}
+      {todayPlan && (
+        <div className="rounded-3xl bg-stone-900 border border-rose-900/30 p-4 space-y-3 shadow-md">
+          <div className="flex items-start justify-between border-b border-stone-800/80 pb-2.5">
+            <div>
+              <div className="flex items-center gap-1.5 text-xs text-rose-300 font-bold">
+                <CheckCircle2 className="w-4 h-4 text-rose-400" />
+                <span>{todayPlan.title}</span>
+              </div>
+              <p className="text-[10px] text-stone-400 mt-0.5">{todayPlan.vibeSummary}</p>
+            </div>
+            <span className="text-[10px] text-stone-300 bg-stone-950 px-2.5 py-0.5 rounded-full border border-stone-800 font-latin">
+              {timeMinutes}m
+            </span>
+          </div>
+
+          {/* Action Steps */}
+          <div className="space-y-2">
+            {todayPlan.actions.map((act, idx) => (
+              <div
+                key={idx}
+                onClick={() => toggleActionDone(idx)}
+                className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-start gap-2.5 ${
+                  act.done
+                    ? 'bg-rose-950/20 border-rose-800/40 opacity-75'
+                    : 'bg-stone-950 border-stone-800 hover:border-stone-700'
+                }`}
+              >
+                <div
+                  className={`w-5 h-5 rounded-md flex items-center justify-center mt-0.5 shrink-0 transition-colors ${
+                    act.done
+                      ? 'bg-rose-500 text-stone-950 font-bold'
+                      : 'border border-stone-600 text-transparent'
+                  }`}
+                >
+                  <Check className="w-3 h-3 stroke-[3]" />
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center justify-between">
+                    <span className={`text-xs font-semibold ${act.done ? 'line-through text-stone-400' : 'text-stone-200'}`}>
+                      {act.title}
+                    </span>
+                    <span className="text-[10px] text-stone-400 font-latin">{act.time}</span>
+                  </div>
+                  <p className="text-[11px] text-stone-400 mt-0.5 leading-relaxed">{act.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Good Enough Banner */}
+          <div className="p-2.5 rounded-2xl bg-stone-950 border border-stone-800 flex items-center justify-between text-xs">
+            <span className="text-stone-300 text-[11px]">✨ {todayPlan.goodEnoughMessage}</span>
+            <button
+              onClick={onOpenGoodEnough}
+              className="text-[11px] text-rose-300 hover:text-rose-200 underline font-medium whitespace-nowrap mr-2"
+            >
+              بستن آینه
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* "کاش زودتر می‌دونستم" Wisdom Pearl */}
+      <div className="rounded-3xl bg-gradient-to-r from-stone-900 via-stone-900 to-stone-950 border border-stone-800 p-4 space-y-2 shadow-xs">
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-amber-300 font-semibold flex items-center gap-1">
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>کاش زودتر می‌دونستم</span>
+          </span>
+          <button
+            onClick={() => {
+              sounds.playChime('click');
+              setWisdomIndex((prev) => (prev + 1) % WISDOM_QUOTES.length);
+            }}
+            className="text-[11px] text-stone-400 hover:text-stone-200 underline"
+          >
+            نکته بعدی
+          </button>
+        </div>
+        <p className="text-xs text-stone-200 leading-relaxed italic">
+          «{WISDOM_QUOTES[wisdomIndex].text}»
+        </p>
+        <div className="flex items-center justify-between pt-1 text-[10px] text-stone-500">
+          <span>موضوع: {WISDOM_QUOTES[wisdomIndex].theme}</span>
+          <span>آینـا | هوشمندی زیبایی</span>
+        </div>
+      </div>
+    </div>
+  );
+};
