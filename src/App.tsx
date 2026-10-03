@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { TabType, BeautyDna, ClosetItem, BeautyProductItem, SavedLook } from './types';
+import { TabType, BeautyDna, ClosetItem, BeautyProductItem, SavedLook, UserSubscription } from './types';
 import { DEFAULT_CLOSET, DEFAULT_SHELF } from './data/beautyKnowledge';
 import { TelegramHeader } from './components/TelegramHeader';
 import { Navigation } from './components/Navigation';
@@ -14,6 +14,7 @@ import { DnaTab } from './components/tabs/DnaTab';
 import { ClosetTab } from './components/tabs/ClosetTab';
 import { SosTab } from './components/tabs/SosTab';
 import { WisdomTab } from './components/tabs/WisdomTab';
+import { AdminTab } from './components/tabs/AdminTab';
 import { ChatCoachModal } from './components/ChatCoachModal';
 import { GoodEnoughModal } from './components/GoodEnoughModal';
 import { ScannerModal } from './components/ScannerModal';
@@ -34,6 +35,7 @@ import { MakeupHairStudioModal } from './components/modals/MakeupHairStudioModal
 import { SkinProblemSolverModal } from './components/modals/SkinProblemSolverModal';
 import { BodyAccessoriesModal } from './components/modals/BodyAccessoriesModal';
 import { DailyChallengeModal } from './components/modals/DailyChallengeModal';
+import { PremiumModal } from './components/modals/PremiumModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { safeStorage } from './utils/safeStorage';
 
@@ -82,8 +84,39 @@ export default function App() {
   const [isSkinProblemOpen, setIsSkinProblemOpen] = useState<boolean>(false);
   const [isBodyAccessoriesOpen, setIsBodyAccessoriesOpen] = useState<boolean>(false);
   const [isDailyChallengeOpen, setIsDailyChallengeOpen] = useState<boolean>(false);
+  const [isPremiumModalOpen, setIsPremiumModalOpen] = useState<boolean>(false);
   const [tgUserFirstName, setTgUserFirstName] = useState<string | undefined>();
   const [tgUserId, setTgUserId] = useState<string | undefined>();
+  const [tgUsername, setTgUsername] = useState<string | undefined>();
+
+  // Subscription State
+  const [userSubscription, setUserSubscription] = useState<UserSubscription>(() => {
+    return safeStorage.get('ayna_subscription', { tier: 'free', isActive: false });
+  });
+
+  const handleActivateSubscription = (sub: UserSubscription) => {
+    setUserSubscription(sub);
+    safeStorage.set('ayna_subscription', sub);
+    if (tgUserId) {
+      fetch('/api/user/subscription', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ telegramId: tgUserId, subscription: sub }),
+      }).catch(() => {});
+    }
+  };
+
+  // Dedicated Admin Identification for Telegram ID 291775184 and @Av_abbas
+  const ADMIN_ID = '291775184';
+  const ADMIN_USERNAME = 'av_abbas';
+
+  const isUserAdmin = Boolean(
+    (tgUserId && String(tgUserId) === ADMIN_ID) ||
+    (tgUsername && tgUsername.toLowerCase().replace('@', '') === ADMIN_USERNAME) ||
+    (typeof window !== 'undefined' &&
+      (new URLSearchParams(window.location.search).get('admin') === 'true' ||
+       safeStorage.get('ayna_simulated_admin', false)))
+  );
 
   // Persistent States
   const [userDna, setUserDna] = useState<BeautyDna>(() => {
@@ -148,6 +181,9 @@ export default function App() {
       if (user?.first_name) {
         setTgUserFirstName(user.first_name);
       }
+      if (user?.username) {
+        setTgUsername(user.username);
+      }
       if (user?.id) {
         const idStr = String(user.id);
         setTgUserId(idStr);
@@ -161,6 +197,16 @@ export default function App() {
               if (Array.isArray(data.closet) && data.closet.length > 0) setClosetItems(data.closet);
               if (Array.isArray(data.shelf) && data.shelf.length > 0) setShelfItems(data.shelf);
               if (Array.isArray(data.savedLooks) && data.savedLooks.length > 0) setSavedLooks(data.savedLooks);
+            }
+          })
+          .catch(() => {});
+
+        fetch(`/api/user/subscription/${idStr}`)
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data) => {
+            if (data?.subscription) {
+              setUserSubscription(data.subscription);
+              safeStorage.set('ayna_subscription', data.subscription);
             }
           })
           .catch(() => {});
@@ -325,6 +371,10 @@ export default function App() {
             onOpenMixer={() => setIsMixerOpen(true)}
             onOpenTelegramSetup={() => setIsTelegramSetupOpen(true)}
             savedLooksCount={savedLooks.length}
+            isAdmin={isUserAdmin}
+            onOpenAdmin={() => setCurrentTab('admin')}
+            isPremium={userSubscription?.isActive}
+            onOpenPremium={() => setIsPremiumModalOpen(true)}
           />
 
           {/* Main Content Area */}
@@ -352,6 +402,8 @@ export default function App() {
                 onOpenSkinProblemSolver={() => setIsSkinProblemOpen(true)}
                 onOpenBodyAccessories={() => setIsBodyAccessoriesOpen(true)}
                 onOpenDailyChallenge={() => setIsDailyChallengeOpen(true)}
+                onOpenPremium={() => setIsPremiumModalOpen(true)}
+                isPremium={userSubscription?.isActive}
               />
             )}
 
@@ -398,12 +450,21 @@ export default function App() {
                 onOpenBeautyDefense={() => setIsBeautyDefenseOpen(true)}
               />
             )}
+
+            {currentTab === 'admin' && isUserAdmin && (
+              <AdminTab
+                adminId={tgUserId || ADMIN_ID}
+                adminUsername={tgUsername || ADMIN_USERNAME}
+                onNavigateTab={(tab) => setCurrentTab(tab)}
+              />
+            )}
           </main>
 
           {/* Telegram Bottom Navigation */}
           <Navigation
             currentTab={currentTab}
             onSelectTab={(tab) => setCurrentTab(tab)}
+            isAdmin={isUserAdmin}
           />
 
           {/* Floating Modals */}
@@ -529,6 +590,14 @@ export default function App() {
           <DailyChallengeModal
             isOpen={isDailyChallengeOpen}
             onClose={() => setIsDailyChallengeOpen(false)}
+          />
+
+          <PremiumModal
+            isOpen={isPremiumModalOpen}
+            onClose={() => setIsPremiumModalOpen(false)}
+            currentSubscription={userSubscription}
+            onActivateSubscription={handleActivateSubscription}
+            telegramUsername={tgUsername}
           />
         </div>
       </div>

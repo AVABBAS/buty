@@ -42,12 +42,14 @@ class DatabaseService {
     closet: Record<string, any[]>;
     shelf: Record<string, any[]>;
     savedLooks: Record<string, any[]>;
+    subscriptions: Record<string, any>;
   } = {
     users: {},
     dna: {},
     closet: {},
     shelf: {},
     savedLooks: {},
+    subscriptions: {},
   };
 
   constructor() {
@@ -62,6 +64,8 @@ class DatabaseService {
     this.embeddedFilePath = path.resolve(dataDir, 'ayna_database.json');
   }
 
+  private saveTimeout: NodeJS.Timeout | null = null;
+
   async init(): Promise<void> {
     const dbUrl = process.env.DATABASE_URL;
 
@@ -70,9 +74,12 @@ class DatabaseService {
         this.pgPool = new Pool({
           connectionString: dbUrl,
           ssl: process.env.NODE_ENV === 'production' && !dbUrl.includes('localhost') ? { rejectUnauthorized: false } : undefined,
+          max: 20, // High-concurrency connection pool
+          idleTimeoutMillis: 30000,
+          connectionTimeoutMillis: 5000,
         });
 
-        // Test connection & create tables
+        // Test connection, create tables and high-speed indexes
         await this.pgPool.query(`
           CREATE TABLE IF NOT EXISTS ayna_users (
             telegram_id VARCHAR(64) PRIMARY KEY,
@@ -89,10 +96,13 @@ class DatabaseService {
             saved_looks JSONB,
             updated_at TIMESTAMP DEFAULT NOW()
           );
+
+          CREATE INDEX IF NOT EXISTS idx_ayna_users_last_active ON ayna_users(last_active);
+          CREATE INDEX IF NOT EXISTS idx_ayna_user_data_updated ON ayna_user_data(updated_at);
         `);
 
         this.isPostgres = true;
-        console.log('✅ Connected to PostgreSQL database successfully!');
+        console.log('✅ Connected to PostgreSQL database successfully with connection pooling and indexes!');
         return;
       } catch (err) {
         console.warn('⚠️ PostgreSQL connection failed, falling back to embedded persistent database:', err);
@@ -111,23 +121,33 @@ class DatabaseService {
       if (fs.existsSync(this.embeddedFilePath)) {
         const raw = fs.readFileSync(this.embeddedFilePath, 'utf-8');
         this.embeddedData = JSON.parse(raw);
+        if (!this.embeddedData.subscriptions) {
+          this.embeddedData.subscriptions = {};
+        }
       } else {
         this.saveEmbeddedData();
       }
     } catch (e) {
       console.warn('Failed to load embedded DB file, resetting to empty state:', e);
-      this.embeddedData = { users: {}, dna: {}, closet: {}, shelf: {}, savedLooks: {} };
+      this.embeddedData = { users: {}, dna: {}, closet: {}, shelf: {}, savedLooks: {}, subscriptions: {} };
     }
   }
 
+  // Non-blocking, debounced disk flush to keep the Node.js event loop free
   private saveEmbeddedData() {
-    try {
-      const tempPath = `${this.embeddedFilePath}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify(this.embeddedData, null, 2), 'utf-8');
-      fs.renameSync(tempPath, this.embeddedFilePath);
-    } catch (e) {
-      console.error('Failed to write embedded database to disk:', e);
+    if (this.saveTimeout) {
+      clearTimeout(this.saveTimeout);
     }
+
+    this.saveTimeout = setTimeout(async () => {
+      try {
+        const tempPath = `${this.embeddedFilePath}.tmp`;
+        await fs.promises.writeFile(tempPath, JSON.stringify(this.embeddedData), 'utf-8');
+        await fs.promises.rename(tempPath, this.embeddedFilePath);
+      } catch (e) {
+        console.error('Failed to write embedded database to disk asynchronously:', e);
+      }
+    }, 120);
   }
 
   async syncUserData(payload: UserSyncPayload): Promise<boolean> {
@@ -283,6 +303,95 @@ class DatabaseService {
     delete this.embeddedData.savedLooks[telegramId];
     this.saveEmbeddedData();
     return true;
+  }
+
+  async getAllUsers(limit = 100): Promise<Array<{
+    telegramId: string;
+    firstName?: string;
+    username?: string;
+    lastActive: string;
+    looksCount?: number;
+    closetCount?: number;
+  }>> {
+    if (this.isPostgres && this.pgPool) {
+      try {
+        const res = await this.pgPool.query(
+          `SELECT u.telegram_id, u.first_name, u.username, u.last_active,
+                  COALESCE(jsonb_array_length(d.saved_looks), 0) as looks_count,
+                  COALESCE(jsonb_array_length(d.closet), 0) as closet_count
+           FROM ayna_users u
+           LEFT JOIN ayna_user_data d ON u.telegram_id = d.telegram_id
+           ORDER BY u.last_active DESC
+           LIMIT $1`,
+          [limit]
+        );
+        return res.rows.map((r) => ({
+          telegramId: r.telegram_id,
+          firstName: r.first_name,
+          username: r.username,
+          lastActive: r.last_active,
+          looksCount: parseInt(r.looks_count || '0', 10),
+          closetCount: parseInt(r.closet_count || '0', 10),
+        }));
+      } catch (e) {
+        console.error('Failed to get users from Postgres:', e);
+        return [];
+      }
+    }
+
+    // Embedded mode
+    const list = Object.entries(this.embeddedData.users).map(([id, u]) => ({
+      telegramId: id,
+      firstName: u.firstName,
+      username: u.username,
+      lastActive: u.lastActive,
+      looksCount: Array.isArray(this.embeddedData.savedLooks[id]) ? this.embeddedData.savedLooks[id].length : 0,
+      closetCount: Array.isArray(this.embeddedData.closet[id]) ? this.embeddedData.closet[id].length : 0,
+    }));
+
+    return list.slice(0, limit);
+  }
+
+  async getDatabaseSnapshot(): Promise<any> {
+    if (this.isPostgres && this.pgPool) {
+      try {
+        const usersRes = await this.pgPool.query(`SELECT * FROM ayna_users LIMIT 500`);
+        const dataRes = await this.pgPool.query(`SELECT * FROM ayna_user_data LIMIT 500`);
+        return {
+          timestamp: new Date().toISOString(),
+          engine: 'postgresql',
+          users: usersRes.rows,
+          userData: dataRes.rows,
+        };
+      } catch (e) {
+        return { error: 'Failed to snapshot postgres' };
+      }
+    }
+    return {
+      timestamp: new Date().toISOString(),
+      engine: 'embedded',
+      data: this.embeddedData,
+    };
+  }
+
+  async setSubscription(telegramId: string, subscription: any): Promise<boolean> {
+    if (!isSafeId(telegramId)) return false;
+    this.embeddedData.subscriptions[telegramId] = subscription;
+    this.saveEmbeddedData();
+    return true;
+  }
+
+  async getSubscription(telegramId: string): Promise<any | null> {
+    if (!isSafeId(telegramId)) return null;
+    return this.embeddedData.subscriptions[telegramId] || null;
+  }
+
+  async getAllSubscriptions(): Promise<Array<{ telegramId: string; subscription: any; user?: any }>> {
+    return Object.entries(this.embeddedData.subscriptions).map(([id, sub]) => ({
+      telegramId: id,
+      subscription: sub,
+      user: this.embeddedData.users[id] || null,
+    }));
   }
 }
 

@@ -1,4 +1,28 @@
-export type TabType = 'home' | 'make-it-mine' | 'dna' | 'closet' | 'sos' | 'wisdom';
+export type TabType = 'home' | 'make-it-mine' | 'dna' | 'closet' | 'sos' | 'wisdom' | 'admin';
+
+export type SubscriptionTier = 'free' | 'glow' | 'vip' | 'diamond';
+
+export interface UserSubscription {
+  tier: SubscriptionTier;
+  isActive: boolean;
+  expiresAt?: string; // ISO date string
+  startedAt?: string;
+  planName?: string;
+  paymentMethod?: 'stars' | 'card' | 'admin_gift' | 'promo';
+}
+
+export interface SubscriptionPlan {
+  id: SubscriptionTier;
+  name: string;
+  latinName: string;
+  durationMonths: number;
+  priceToman: number;
+  priceStars: number;
+  originalPriceToman?: number;
+  badge?: string;
+  features: string[];
+  popular?: boolean;
+}
 
 export type EnergyLevel = 'low' | 'medium' | 'high';
 export type MoodType = 'calm' | 'good' | 'neutral' | 'low' | 'stressed' | 'tired' | 'creative' | 'energetic';

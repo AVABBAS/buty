@@ -2,6 +2,7 @@ import express, { Request, Response } from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import compression from 'compression';
 import { GoogleGenAI } from '@google/genai';
 import { db, isSafeId } from './src/db/database.js';
 
@@ -13,6 +14,9 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 const isProd = process.env.NODE_ENV === 'production';
+
+// High-Performance Compression (GZIP/Deflate)
+app.use(compression());
 
 // Defensive Security Configurations
 app.disable('x-powered-by');
@@ -47,6 +51,16 @@ const ipRequests = new Map<string, { count: number; resetTime: number }>();
 const RATE_LIMIT_WINDOW = 60 * 1000;
 const MAX_REQUESTS_PER_WINDOW = 120;
 
+// Periodic cleanup of expired rate-limit IP records to prevent memory leak
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, record] of ipRequests.entries()) {
+    if (now > record.resetTime) {
+      ipRequests.delete(ip);
+    }
+  }
+}, 5 * 60 * 1000);
+
 app.use('/api', (req, res, next) => {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
   const now = Date.now();
@@ -68,7 +82,7 @@ app.use('/api', (req, res, next) => {
 });
 
 // -------------------------------------------------------------
-// Server-Side In-Memory Cache (Essential for 50,000+ Users Scale)
+// Server-Side In-Memory LRU Cache (Essential for 50,000+ Users Scale)
 // -------------------------------------------------------------
 interface CacheItem {
   data: any;
@@ -85,6 +99,9 @@ function getCached(key: string): any | null {
     cache.delete(key);
     return null;
   }
+  // LRU Refresh: Move hit key to the end of the Map
+  cache.delete(key);
+  cache.set(key, item);
   return item.data;
 }
 
@@ -649,6 +666,185 @@ app.get('/api/system/status', async (req: Request, res: Response) => {
   } catch (err) {
     return res.status(500).json({ ok: false, error: 'Failed to get status' });
   }
+});
+
+// -------------------------------------------------------------
+// Admin Dashboard Backend Endpoints (Exclusively for 291775184 / @Av_abbas)
+// -------------------------------------------------------------
+const ADMIN_NUMERICAL_ID = '291775184';
+const ADMIN_USERNAME = 'av_abbas';
+let isMaintenanceMode = false;
+let customWelcomeMessage = 'سلام عزیز! 🌸\nبه مینی‌اپ «آینـا» خوش آمدی.\n\n✨ «هر چیزی که خوشت میاد، نسخه مناسب خودت رو بساز.»';
+
+function checkAdminAuth(req: Request): boolean {
+  const adminId = String(req.headers['x-admin-id'] || req.query.adminId || '');
+  const adminUser = String(req.headers['x-admin-username'] || req.query.adminUser || '').toLowerCase().replace('@', '');
+  return adminId === ADMIN_NUMERICAL_ID || adminUser === ADMIN_USERNAME;
+}
+
+// 1. Admin System Overview
+app.get('/api/admin/overview', async (req: Request, res: Response) => {
+  if (!checkAdminAuth(req)) {
+    return res.status(403).json({ error: 'Access denied: Admin credentials required' });
+  }
+  try {
+    const dbStatus = await db.getStatus();
+    const mem = process.memoryUsage();
+    return res.json({
+      ok: true,
+      admin: {
+        id: ADMIN_NUMERICAL_ID,
+        username: '@Av_abbas',
+      },
+      stats: {
+        totalUsers: dbStatus.totalUsers,
+        totalLooks: dbStatus.totalLooks,
+        uptimeSeconds: Math.floor(process.uptime()),
+        memoryRssMb: Math.round((mem.rss / 1024 / 1024) * 10) / 10,
+        memoryHeapMb: Math.round((mem.heapUsed / 1024 / 1024) * 10) / 10,
+        cacheSize: cache.size,
+        maxCacheSize: MAX_CACHE_SIZE,
+        activeRateLimitIps: ipRequests.size,
+        databaseType: dbStatus.type,
+        databaseConnected: dbStatus.connected,
+        isMaintenanceMode,
+        telegramBotConfigured: !!telegramBotToken,
+        telegramBotUsername: botUsername,
+        appUrl,
+        nodeVersion: process.version,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to retrieve admin overview' });
+  }
+});
+
+// 2. Admin Users Directory
+app.get('/api/admin/users', async (req: Request, res: Response) => {
+  if (!checkAdminAuth(req)) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  try {
+    const users = await db.getAllUsers(100);
+    return res.json({ ok: true, users });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+// 3. Admin User Dossier
+app.get('/api/admin/user/:telegramId', async (req: Request, res: Response) => {
+  if (!checkAdminAuth(req)) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  try {
+    const { telegramId } = req.params;
+    const userData = await db.getUserData(String(telegramId));
+    if (!userData) return res.status(404).json({ error: 'User not found' });
+    return res.json({ ok: true, userData });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to fetch user dossier' });
+  }
+});
+
+// 4. Admin Clear Cache
+app.post('/api/admin/clear-cache', (req: Request, res: Response) => {
+  if (!checkAdminAuth(req)) return res.status(403).json({ error: 'Access denied' });
+  const count = cache.size;
+  cache.clear();
+  return res.json({ ok: true, message: `حافظه موقت با موفقیت پاک شد (${count} آیتم)` });
+});
+
+// 5. Admin Clear Rate Limiter
+app.post('/api/admin/clear-ratelimit', (req: Request, res: Response) => {
+  if (!checkAdminAuth(req)) return res.status(403).json({ error: 'Access denied' });
+  const count = ipRequests.size;
+  ipRequests.clear();
+  return res.json({ ok: true, message: `محدودیت‌های آی‌پی بازنشانی شدند (${count} آی‌پی آزاد شد)` });
+});
+
+// 6. Admin Toggle Maintenance Mode
+app.post('/api/admin/toggle-maintenance', (req: Request, res: Response) => {
+  if (!checkAdminAuth(req)) return res.status(403).json({ error: 'Access denied' });
+  isMaintenanceMode = !isMaintenanceMode;
+  return res.json({ ok: true, isMaintenanceMode });
+});
+
+// 7. Admin Export Database Snapshot
+app.get('/api/admin/export', async (req: Request, res: Response) => {
+  if (!checkAdminAuth(req)) return res.status(403).json({ error: 'Access denied' });
+  try {
+    const snapshot = await db.getDatabaseSnapshot();
+    res.setHeader('Content-Disposition', 'attachment; filename="ayna_backup.json"');
+    return res.json(snapshot);
+  } catch (err) {
+    return res.status(500).json({ error: 'Export failed' });
+  }
+});
+
+// 8. Admin Test Telegram Bot Ping
+app.post('/api/admin/test-bot-ping', async (req: Request, res: Response) => {
+  if (!checkAdminAuth(req)) return res.status(403).json({ error: 'Access denied' });
+  if (!telegramBotToken) {
+    return res.json({ ok: false, message: 'توکن ربات تلگرام روی سرور تنظیم نشده است.' });
+  }
+  try {
+    const resMe = await fetch(`https://api.telegram.org/bot${telegramBotToken}/getMe`);
+    const data = await resMe.json();
+    return res.json({ ok: data?.ok, result: data?.result });
+  } catch (err: any) {
+    return res.json({ ok: false, error: err?.message });
+  }
+});
+
+// 9. Admin Subscriptions List
+app.get('/api/admin/subscriptions', async (req: Request, res: Response) => {
+  if (!checkAdminAuth(req)) return res.status(403).json({ error: 'Access denied' });
+  try {
+    const subscriptions = await db.getAllSubscriptions();
+    return res.json({ ok: true, subscriptions });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to fetch subscriptions' });
+  }
+});
+
+// 10. Admin Grant Subscription to User
+app.post('/api/admin/subscription/grant', async (req: Request, res: Response) => {
+  if (!checkAdminAuth(req)) return res.status(403).json({ error: 'Access denied' });
+  const { targetTelegramId, tier, durationMonths, planName } = req.body;
+  if (!targetTelegramId) return res.status(400).json({ error: 'Target Telegram ID required' });
+
+  const expiry = new Date();
+  expiry.setMonth(expiry.getMonth() + (Number(durationMonths) || 1));
+
+  const sub = {
+    tier: tier || 'vip',
+    isActive: true,
+    expiresAt: expiry.toISOString(),
+    startedAt: new Date().toISOString(),
+    planName: planName || 'اشتراک اهدایی مدیریت',
+    paymentMethod: 'admin_gift',
+  };
+
+  await db.setSubscription(String(targetTelegramId), sub);
+  return res.json({ ok: true, message: `اشتراک ${tier} با موفقیت به کاربر ${targetTelegramId} اهدا شد`, subscription: sub });
+});
+
+// -------------------------------------------------------------
+// User-Facing Subscription API Endpoints
+// -------------------------------------------------------------
+app.get('/api/user/subscription/:telegramId', async (req: Request, res: Response) => {
+  const { telegramId } = req.params;
+  if (!telegramId) return res.status(400).json({ error: 'Telegram ID required' });
+  const sub = await db.getSubscription(String(telegramId));
+  return res.json({ ok: true, subscription: sub });
+});
+
+app.post('/api/user/subscription', async (req: Request, res: Response) => {
+  const { telegramId, subscription } = req.body;
+  if (!telegramId || !subscription) return res.status(400).json({ error: 'Invalid payload' });
+  await db.setSubscription(String(telegramId), subscription);
+  return res.json({ ok: true, subscription });
 });
 
 // Webhook endpoint for Telegram

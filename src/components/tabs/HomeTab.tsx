@@ -48,6 +48,8 @@ interface HomeTabProps {
   onOpenSkinProblemSolver: () => void;
   onOpenBodyAccessories: () => void;
   onOpenDailyChallenge: () => void;
+  onOpenPremium?: () => void;
+  isPremium?: boolean;
 }
 
 export const HomeTab: React.FC<HomeTabProps> = ({
@@ -72,6 +74,8 @@ export const HomeTab: React.FC<HomeTabProps> = ({
   onOpenSkinProblemSolver,
   onOpenBodyAccessories,
   onOpenDailyChallenge,
+  onOpenPremium,
+  isPremium,
 }) => {
   // Daily Check States
   const [energy, setEnergy] = useState<EnergyLevel>('medium');
@@ -140,25 +144,25 @@ export const HomeTab: React.FC<HomeTabProps> = ({
   return (
     <div className="space-y-4 pb-20">
       {/* Luxury Editorial Hero Card */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-stone-900 via-stone-950 to-stone-900 border border-stone-800 p-5 text-stone-100 shadow-xl">
-        <div className="absolute -top-16 -left-16 w-48 h-48 bg-rose-400/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-16 -right-16 w-48 h-48 bg-amber-400/10 rounded-full blur-3xl pointer-events-none" />
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-stone-900 via-stone-950 to-stone-900 border border-white/[0.08] p-5 text-stone-100 shadow-[0_10px_35px_rgba(0,0,0,0.6)]">
+        <div className="absolute -top-16 -left-16 w-56 h-56 bg-rose-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-16 -right-16 w-56 h-56 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
         
-        <div className="relative z-10 space-y-2.5">
+        <div className="relative z-10 space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-medium text-amber-300 tracking-wider font-latin uppercase">
-              AYNA PERSONAL ASSISTANT
+            <span className="text-[10px] font-semibold text-amber-300/90 tracking-widest font-latin uppercase">
+              AYNA EDITORIAL BEAUTY
             </span>
             <button
               onClick={onOpenGoodEnough}
-              className="text-[11px] bg-rose-950/70 hover:bg-rose-900 text-rose-200 border border-rose-800/60 px-3 py-1 rounded-full transition-colors flex items-center gap-1 shadow-xs"
+              className="text-[11px] bg-rose-950/50 hover:bg-rose-900/80 active:scale-95 text-rose-200 border border-rose-500/30 px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 shadow-xs"
             >
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>کافیه! (Good Enough)</span>
+              <ShieldCheck className="w-3.5 h-3.5 text-rose-300" />
+              <span className="font-semibold">کافیه! (Good Enough)</span>
             </button>
           </div>
 
-          <h1 className="text-lg font-bold leading-snug text-stone-50">
+          <h1 className="text-xl font-extrabold leading-snug text-stone-50 tracking-tight">
             «هر چیزی که خوشت میاد، نسخه مناسب خودت رو بساز.»
           </h1>
           <p className="text-xs text-stone-300 leading-relaxed max-w-sm">
@@ -166,30 +170,30 @@ export const HomeTab: React.FC<HomeTabProps> = ({
           </p>
 
           {/* Interactive Feature Hero Buttons */}
-          <div className="pt-2 grid grid-cols-2 gap-2">
+          <div className="pt-2 grid grid-cols-2 gap-2.5">
             <button
               onClick={onOpenScanner}
-              className="p-2.5 rounded-2xl bg-gradient-to-r from-amber-500/20 to-rose-500/20 hover:from-amber-500/30 hover:to-rose-500/30 border border-amber-500/40 text-stone-100 flex items-center gap-2.5 transition-all group"
+              className="p-3 rounded-2xl bg-stone-900/90 hover:bg-stone-850 active:scale-98 border border-amber-500/30 text-stone-100 flex items-center gap-2.5 transition-all shadow-sm group"
             >
-              <div className="w-8 h-8 rounded-xl bg-amber-500/30 text-amber-200 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+              <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-300 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform border border-amber-500/30">
                 <Camera className="w-4 h-4" />
               </div>
               <div className="text-right">
                 <span className="text-xs font-bold block text-stone-100">آینه و اسکن چهره</span>
-                <span className="text-[10px] text-amber-300/90 block">تحلیل هندسه و آندرتون</span>
+                <span className="text-[10px] text-amber-300/80 block">تحلیل فرم و آندرتون</span>
               </div>
             </button>
 
             <button
               onClick={() => onOpenRoutine(timeMinutes)}
-              className="p-2.5 rounded-2xl bg-gradient-to-r from-rose-500/20 to-pink-500/20 hover:from-rose-500/30 hover:to-pink-500/30 border border-rose-500/40 text-stone-100 flex items-center gap-2.5 transition-all group"
+              className="p-3 rounded-2xl bg-stone-900/90 hover:bg-stone-850 active:scale-98 border border-rose-500/30 text-stone-100 flex items-center gap-2.5 transition-all shadow-sm group"
             >
-              <div className="w-8 h-8 rounded-xl bg-rose-500/30 text-rose-200 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+              <div className="w-8 h-8 rounded-xl bg-rose-500/20 text-rose-300 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform border border-rose-500/30">
                 <Play className="w-4 h-4 fill-current ml-0.5" />
               </div>
               <div className="text-right">
                 <span className="text-xs font-bold block text-stone-100">پلیر زنده روتین</span>
-                <span className="text-[10px] text-rose-300/90 block">تایمر صوتی {timeMinutes} دقیقه‌ای</span>
+                <span className="text-[10px] text-rose-300/80 block">تایمر صوتی {timeMinutes} دقیقه‌ای</span>
               </div>
             </button>
           </div>
@@ -199,10 +203,10 @@ export const HomeTab: React.FC<HomeTabProps> = ({
       {/* Unified Search Quick Bar (جستجوی یکپارچه هوشمند) */}
       <div
         onClick={onOpenSearch}
-        className="p-3 rounded-2xl bg-stone-900 hover:bg-stone-850 border border-stone-800 hover:border-rose-900/60 transition-all cursor-pointer flex items-center justify-between shadow-xs group"
+        className="p-3.5 rounded-2xl bg-stone-900/90 hover:bg-stone-850 active:scale-98 border border-white/[0.08] hover:border-rose-500/40 transition-all cursor-pointer flex items-center justify-between shadow-sm group"
       >
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-stone-950 border border-stone-800 text-stone-400 group-hover:text-rose-300 flex items-center justify-center transition-colors">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-xl bg-stone-950 border border-white/[0.08] text-stone-400 group-hover:text-rose-300 flex items-center justify-center transition-colors">
             <span className="text-sm">🔍</span>
           </div>
           <div>
@@ -214,32 +218,62 @@ export const HomeTab: React.FC<HomeTabProps> = ({
             </span>
           </div>
         </div>
-        <span className="text-[10px] text-rose-300 bg-rose-950/80 border border-rose-800/60 px-2 py-0.5 rounded-full font-latin">
-          Search
+        <span className="text-[10px] text-rose-300 font-latin tracking-wider uppercase font-semibold">
+          SEARCH
         </span>
       </div>
 
+      {/* VIP Premium Promotional Banner */}
+      {!isPremium && onOpenPremium && (
+        <div
+          onClick={onOpenPremium}
+          className="p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/15 via-rose-500/15 to-purple-500/15 hover:from-amber-500/25 hover:to-rose-500/25 border border-amber-500/40 transition-all cursor-pointer flex items-center justify-between shadow-xs group active:scale-98"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-amber-400 to-rose-400 text-stone-950 flex items-center justify-center font-bold text-base shadow-sm shrink-0">
+              👑
+            </div>
+            <div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-bold text-stone-100 group-hover:text-amber-200 transition-colors">
+                  ارتقا به آینـا پریمیوم (VIP Atelier)
+                </span>
+                <span className="text-[9px] bg-amber-400 text-stone-950 px-1.5 py-0.2 rounded font-extrabold">
+                  ۳۰٪ تخفیف
+                </span>
+              </div>
+              <p className="text-[10px] text-stone-400 mt-0.5">
+                اسکن نامحدود چهره، شبیه‌ساز ست کمد و چت ۲۴ ساعته با هوش مصنوعی
+              </p>
+            </div>
+          </div>
+          <span className="text-[10px] text-amber-300 font-latin font-bold bg-amber-950/80 border border-amber-600/50 px-2.5 py-1 rounded-xl shrink-0">
+            مشاهده
+          </span>
+        </div>
+      )}
+
       {/* Specialized Studios Grid (استودیوهای ۵ گانه تخصصی) */}
-      <div className="space-y-2">
+      <div className="space-y-2.5">
         <div className="flex items-center justify-between px-1">
-          <h2 className="text-xs font-bold text-stone-200 flex items-center gap-1.5">
+          <h2 className="text-xs font-bold text-stone-200 flex items-center gap-2">
             <span>استودیوهای تخصصی زیبایی و استایل</span>
-            <span className="text-[10px] text-rose-300 bg-rose-950/80 px-1.5 py-0.2 rounded font-latin">STUDIOS</span>
+            <span className="text-[10px] text-rose-300 font-latin tracking-wider uppercase font-semibold">STUDIOS</span>
           </h2>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-xs">
           {/* Studio 1: Makeup AI */}
           <button
             onClick={onOpenMakeupStudio}
-            className="p-3 rounded-2xl bg-stone-900 hover:bg-stone-850 border border-stone-800 hover:border-rose-800/60 text-right transition-all flex flex-col justify-between shadow-xs"
+            className="p-3.5 rounded-2xl bg-stone-900/90 hover:bg-stone-850 active:scale-98 border border-white/[0.06] hover:border-rose-500/30 text-right transition-all flex flex-col justify-between shadow-sm group"
           >
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-lg">💄</span>
-              <span className="text-[9px] text-rose-400 bg-rose-950/80 px-1.5 py-0.5 rounded font-latin">Makeup</span>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xl">💄</span>
+              <span className="text-[10px] text-rose-300/90 font-latin tracking-wider uppercase font-semibold">Makeup</span>
             </div>
             <div>
-              <span className="font-bold text-stone-200 block text-xs">استودیوی میکاپ AI</span>
+              <span className="font-bold text-stone-100 block text-xs group-hover:text-rose-200 transition-colors">استودیوی میکاپ AI</span>
               <span className="text-[10px] text-stone-400 block mt-0.5">چشم، کانتور، لب و تینت</span>
             </div>
           </button>
@@ -247,14 +281,14 @@ export const HomeTab: React.FC<HomeTabProps> = ({
           {/* Studio 2: Hair Studio */}
           <button
             onClick={onOpenHairStudio}
-            className="p-3 rounded-2xl bg-stone-900 hover:bg-stone-850 border border-stone-800 hover:border-amber-800/60 text-right transition-all flex flex-col justify-between shadow-xs"
+            className="p-3.5 rounded-2xl bg-stone-900/90 hover:bg-stone-850 active:scale-98 border border-white/[0.06] hover:border-amber-500/30 text-right transition-all flex flex-col justify-between shadow-sm group"
           >
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-lg">💇‍♀️</span>
-              <span className="text-[9px] text-amber-400 bg-amber-950/80 px-1.5 py-0.5 rounded font-latin">Hair</span>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xl">💇‍♀️</span>
+              <span className="text-[10px] text-amber-300/90 font-latin tracking-wider uppercase font-semibold">Hair</span>
             </div>
             <div>
-              <span className="font-bold text-stone-200 block text-xs">استودیوی مو و شینیون</span>
+              <span className="font-bold text-stone-100 block text-xs group-hover:text-amber-200 transition-colors">استودیوی مو و شینیون</span>
               <span className="text-[10px] text-stone-400 block mt-0.5">چتری، براشینگ و نجات وز</span>
             </div>
           </button>
@@ -262,14 +296,14 @@ export const HomeTab: React.FC<HomeTabProps> = ({
           {/* Studio 3: Skin Problem Solver */}
           <button
             onClick={onOpenSkinProblemSolver}
-            className="p-3 rounded-2xl bg-stone-900 hover:bg-stone-850 border border-stone-800 hover:border-teal-800/60 text-right transition-all flex flex-col justify-between shadow-xs"
+            className="p-3.5 rounded-2xl bg-stone-900/90 hover:bg-stone-850 active:scale-98 border border-white/[0.06] hover:border-teal-500/30 text-right transition-all flex flex-col justify-between shadow-sm group"
           >
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-lg">🧴</span>
-              <span className="text-[9px] text-teal-400 bg-teal-950/80 px-1.5 py-0.5 rounded font-latin">Skin Rescue</span>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xl">🧴</span>
+              <span className="text-[10px] text-teal-300/90 font-latin tracking-wider uppercase font-semibold">Skin</span>
             </div>
             <div>
-              <span className="font-bold text-stone-200 block text-xs">حل دغدغه‌های پوست</span>
+              <span className="font-bold text-stone-100 block text-xs group-hover:text-teal-200 transition-colors">حل دغدغه‌های پوست</span>
               <span className="text-[10px] text-stone-400 block mt-0.5">پوسته، جوش و ماسیدن کرم</span>
             </div>
           </button>
@@ -277,14 +311,14 @@ export const HomeTab: React.FC<HomeTabProps> = ({
           {/* Studio 4: Body & Accessories */}
           <button
             onClick={onOpenBodyAccessories}
-            className="p-3 rounded-2xl bg-stone-900 hover:bg-stone-850 border border-stone-800 hover:border-purple-800/60 text-right transition-all flex flex-col justify-between shadow-xs"
+            className="p-3.5 rounded-2xl bg-stone-900/90 hover:bg-stone-850 active:scale-98 border border-white/[0.06] hover:border-purple-500/30 text-right transition-all flex flex-col justify-between shadow-sm group"
           >
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-lg">👗</span>
-              <span className="text-[9px] text-purple-400 bg-purple-950/80 px-1.5 py-0.5 rounded font-latin">Body & Scarf</span>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xl">👗</span>
+              <span className="text-[10px] text-purple-300/90 font-latin tracking-wider uppercase font-semibold">Style</span>
             </div>
             <div>
-              <span className="font-bold text-stone-200 block text-xs">فرم بدن، اکسسوری و عطر</span>
+              <span className="font-bold text-stone-100 block text-xs group-hover:text-purple-200 transition-colors">فرم بدن، اکسسوری و عطر</span>
               <span className="text-[10px] text-stone-400 block mt-0.5">خطوط یقه و ۳ لوک با ۱ لباس</span>
             </div>
           </button>
@@ -292,14 +326,14 @@ export const HomeTab: React.FC<HomeTabProps> = ({
           {/* Studio 5: Daily Challenges */}
           <button
             onClick={onOpenDailyChallenge}
-            className="p-3 rounded-2xl bg-stone-900 hover:bg-stone-850 border border-stone-800 hover:border-emerald-800/60 text-right transition-all flex flex-col justify-between shadow-xs col-span-2 sm:col-span-1"
+            className="p-3.5 rounded-2xl bg-stone-900/90 hover:bg-stone-850 active:scale-98 border border-white/[0.06] hover:border-emerald-500/30 text-right transition-all flex flex-col justify-between shadow-sm col-span-2 sm:col-span-1 group"
           >
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-lg">🎯</span>
-              <span className="text-[9px] text-emerald-400 bg-emerald-950/80 px-1.5 py-0.5 rounded font-latin">Daily Challenge</span>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xl">🎯</span>
+              <span className="text-[10px] text-emerald-300/90 font-latin tracking-wider uppercase font-semibold">Challenge</span>
             </div>
             <div>
-              <span className="font-bold text-stone-200 block text-xs">چالش‌های روزانه و یادآورها</span>
+              <span className="font-bold text-stone-100 block text-xs group-hover:text-emerald-200 transition-colors">چالش‌های روزانه و یادآورها</span>
               <span className="text-[10px] text-stone-400 block mt-0.5">کشف تنوع استایل بدون استرس</span>
             </div>
           </button>
@@ -307,7 +341,7 @@ export const HomeTab: React.FC<HomeTabProps> = ({
       </div>
 
       {/* "امروز چی می‌خوای؟" Problem-First Direct Grid */}
-      <div className="space-y-2">
+      <div className="space-y-2.5">
         <div className="flex items-center justify-between px-1">
           <h2 className="text-xs font-bold text-stone-200 flex items-center gap-1.5">
             <span>امروز چی می‌خوای؟</span>
@@ -315,53 +349,53 @@ export const HomeTab: React.FC<HomeTabProps> = ({
           </h2>
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-2.5">
           {/* Option 1: Make It Mine */}
           <button
             onClick={() => onNavigateTab('make-it-mine')}
-            className="flex flex-col text-right p-3 rounded-2xl bg-stone-900 hover:bg-stone-850 border border-stone-800 hover:border-rose-900/60 transition-all group shadow-xs"
+            className="flex flex-col text-right p-3.5 rounded-2xl bg-stone-900/90 hover:bg-stone-850 active:scale-98 border border-white/[0.06] hover:border-rose-500/30 transition-all group shadow-sm"
           >
-            <div className="w-7 h-7 rounded-xl bg-rose-950 text-rose-300 flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform">
+            <div className="w-8 h-8 rounded-xl bg-rose-500/20 text-rose-300 flex items-center justify-center mb-2 group-hover:scale-105 transition-transform border border-rose-500/30">
               <Wand2 className="w-4 h-4" />
             </div>
-            <span className="text-xs font-bold text-stone-200">📸 این عکس رو برام بساز</span>
-            <span className="text-[10px] text-stone-400 mt-0.5">تبدیل ترند اینستاگرام به نسخه خودت</span>
+            <span className="text-xs font-bold text-stone-100 group-hover:text-rose-200 transition-colors">📸 این عکس رو برام بساز</span>
+            <span className="text-[10px] text-stone-400 mt-0.5 leading-relaxed">تبدیل ترند اینستاگرام به نسخه خودت</span>
           </button>
 
           {/* Option 2: Outfit Mixer */}
           <button
             onClick={onOpenMixer}
-            className="flex flex-col text-right p-3 rounded-2xl bg-stone-900 hover:bg-stone-850 border border-stone-800 hover:border-teal-900/60 transition-all group shadow-xs"
+            className="flex flex-col text-right p-3.5 rounded-2xl bg-stone-900/90 hover:bg-stone-850 active:scale-98 border border-white/[0.06] hover:border-teal-500/30 transition-all group shadow-sm"
           >
-            <div className="w-7 h-7 rounded-xl bg-teal-950 text-teal-300 flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform">
+            <div className="w-8 h-8 rounded-xl bg-teal-500/20 text-teal-300 flex items-center justify-center mb-2 group-hover:scale-105 transition-transform border border-teal-500/30">
               <Layers className="w-4 h-4" />
             </div>
-            <span className="text-xs font-bold text-stone-200">👗 استودیو ست کردن لباس</span>
-            <span className="text-[10px] text-stone-400 mt-0.5">ست زنده مانکن کمد و سنجش هارمونی</span>
+            <span className="text-xs font-bold text-stone-100 group-hover:text-teal-200 transition-colors">👗 استودیو ست کردن لباس</span>
+            <span className="text-[10px] text-stone-400 mt-0.5 leading-relaxed">ست زنده مانکن کمد و سنجش هارمونی</span>
           </button>
 
           {/* Option 3: Second Opinion Duel */}
           <button
             onClick={onOpenSecondOpinion}
-            className="flex flex-col text-right p-3 rounded-2xl bg-stone-900 hover:bg-stone-850 border border-stone-800 hover:border-amber-900/60 transition-all group shadow-xs"
+            className="flex flex-col text-right p-3.5 rounded-2xl bg-stone-900/90 hover:bg-stone-850 active:scale-98 border border-white/[0.06] hover:border-amber-500/30 transition-all group shadow-sm"
           >
-            <div className="w-7 h-7 rounded-xl bg-amber-950 text-amber-300 flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform">
+            <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-300 flex items-center justify-center mb-2 group-hover:scale-105 transition-transform border border-amber-500/30">
               <Scale className="w-4 h-4" />
             </div>
-            <span className="text-xs font-bold text-stone-200">⚖️ دوئل استایل (A vs B)</span>
-            <span className="text-[10px] text-stone-400 mt-0.5">اسلایدر مقایسه تصویری دو انتخاب</span>
+            <span className="text-xs font-bold text-stone-100 group-hover:text-amber-200 transition-colors">⚖️ دوئل استایل (A vs B)</span>
+            <span className="text-[10px] text-stone-400 mt-0.5 leading-relaxed">اسلایدر مقایسه تصویری دو انتخاب</span>
           </button>
 
           {/* Option 4: Beauty SOS */}
           <button
             onClick={() => onNavigateTab('sos')}
-            className="flex flex-col text-right p-3 rounded-2xl bg-stone-900 hover:bg-stone-850 border border-stone-800 hover:border-red-900/60 transition-all group shadow-xs"
+            className="flex flex-col text-right p-3.5 rounded-2xl bg-stone-900/90 hover:bg-stone-850 active:scale-98 border border-white/[0.06] hover:border-rose-500/30 transition-all group shadow-sm"
           >
-            <div className="w-7 h-7 rounded-xl bg-red-950 text-red-300 flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform">
+            <div className="w-8 h-8 rounded-xl bg-rose-950/80 text-rose-300 flex items-center justify-center mb-2 group-hover:scale-105 transition-transform border border-rose-800/40">
               <AlertCircle className="w-4 h-4" />
             </div>
-            <span className="text-xs font-bold text-stone-200">🆘 بحران زیبایی / تریـاژ</span>
-            <span className="text-[10px] text-stone-400 mt-0.5">جوش، وز مو، ماسیدن آرایش، کلافگی</span>
+            <span className="text-xs font-bold text-stone-100 group-hover:text-rose-200 transition-colors">🆘 بحران زیبایی / تریـاژ</span>
+            <span className="text-[10px] text-stone-400 mt-0.5 leading-relaxed">جوش، وز مو، ماسیدن آرایش، کلافگی</span>
           </button>
         </div>
       </div>
