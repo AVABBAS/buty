@@ -1,11 +1,20 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
+import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import compression from 'compression';
 import { GoogleGenAI } from '@google/genai';
 import { db, isSafeId } from './src/db/database.js';
-import { requireTelegramUser, requireAdmin, ADMIN_NUMERICAL_ID, ADMIN_USERNAME, AuthenticatedRequest } from './src/server/auth.js';
+import {
+  requireTelegramUser,
+  requireAdmin,
+  requireResourceOwnerOrAdmin,
+  isVerifiedAdmin,
+  ADMIN_NUMERICAL_ID,
+  ADMIN_USERNAME,
+  AuthenticatedRequest,
+} from './src/server/auth.js';
 import { TelegramStarsProvider, IranianGatewayProvider, SERVER_SUBSCRIPTION_PLANS } from './src/server/payments.js';
 import { DecisionEngine, DECISION_ENGINE_VERSION, PROMPT_VERSION } from './src/server/decisionEngine.js';
 import { LearningEngine } from './src/server/learningEngine.js';
@@ -24,6 +33,9 @@ if (isProd) {
   if (!process.env.DATABASE_URL) {
     console.error('❌ FATAL: DATABASE_URL is required in production environment (Neon PostgreSQL).');
     process.exit(1);
+  }
+  if (!process.env.TELEGRAM_WEBHOOK_SECRET) {
+    console.warn('⚠️ WARNING: TELEGRAM_WEBHOOK_SECRET is not configured in production. Webhook calls will be rejected for security.');
   }
 }
 if (!process.env.GEMINI_API_KEY) {
@@ -89,40 +101,53 @@ function sanitizeText(input: unknown, maxLen = 2000): string {
   return input.trim().slice(0, maxLen);
 }
 
-// In-Memory Rate Limiter (Protects against AI API spam / DoS)
-const ipRequests = new Map<string, { count: number; resetTime: number }>();
-const RATE_LIMIT_WINDOW = 60 * 1000;
-const MAX_REQUESTS_PER_WINDOW = 120;
+// -------------------------------------------------------------
+// Multi-Tier Rate Limiting Architecture (Memory-Safe & Granular)
+// -------------------------------------------------------------
+function createRateLimiter(windowMs: number, maxRequests: number, keyPrefix = '') {
+  const map = new Map<string, { count: number; resetTime: number }>();
 
-// Periodic cleanup of expired rate-limit IP records to prevent memory leak
-setInterval(() => {
-  const now = Date.now();
-  for (const [ip, record] of ipRequests.entries()) {
-    if (now > record.resetTime) {
-      ipRequests.delete(ip);
+  // Cleanup expired entries periodically to prevent memory exhaustion
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, record] of map.entries()) {
+      if (now > record.resetTime) {
+        map.delete(key);
+      }
     }
-  }
-}, 5 * 60 * 1000);
+  }, 5 * 60 * 1000);
 
-app.use('/api', (req, res, next) => {
-  const ip = req.ip || req.socket.remoteAddress || 'unknown';
-  const now = Date.now();
-  const record = ipRequests.get(ip);
+  return (req: Request, res: Response, next: NextFunction) => {
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const authId = (req as AuthenticatedRequest).telegramUser?.id;
+    const clientKey = `${keyPrefix}:${authId ? `u:${authId}` : `ip:${ip}`}`;
+    const now = Date.now();
+    const record = map.get(clientKey);
 
-  if (!record || now > record.resetTime) {
-    ipRequests.set(ip, { count: 1, resetTime: now + RATE_LIMIT_WINDOW });
-    return next();
-  }
+    if (!record || now > record.resetTime) {
+      map.set(clientKey, { count: 1, resetTime: now + windowMs });
+      return next();
+    }
 
-  if (record.count >= MAX_REQUESTS_PER_WINDOW) {
-    return res.status(429).json({
-      error: 'تعداد درخواست‌ها بیش از حد مجاز است. لطفاً چند لحظه صبر کنید.',
-    });
-  }
+    if (record.count >= maxRequests) {
+      return res.status(429).json({
+        error: 'تعداد درخواست‌ها بیش از حد مجاز است. لطفاً کمی بعد دوباره تلاش کنید.',
+        code: 'RATE_LIMIT_EXCEEDED',
+      });
+    }
 
-  record.count += 1;
-  next();
-});
+    record.count += 1;
+    next();
+  };
+}
+
+const generalLimiter = createRateLimiter(60 * 1000, 120, 'gen');
+const aiLimiter = createRateLimiter(60 * 1000, 35, 'ai');
+const paymentLimiter = createRateLimiter(5 * 60 * 1000, 10, 'pay');
+const promoLimiter = createRateLimiter(15 * 60 * 1000, 5, 'promo');
+const adminLimiter = createRateLimiter(60 * 1000, 60, 'adm');
+
+app.use('/api', generalLimiter);
 
 // -------------------------------------------------------------
 // Server-Side In-Memory LRU Cache (Essential for 50,000+ Users Scale)
@@ -295,13 +320,14 @@ function generateFallbackSecondOpinion(optionA: string, optionB: string, context
 // -------------------------------------------------------------
 
 // 1. Make It Mine
-app.post('/api/ai/make-it-mine', async (req: Request, res: Response) => {
+app.post('/api/ai/make-it-mine', requireTelegramUser, aiLimiter, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const userId = String(req.telegramUser?.id || 'anon');
     const prompt = sanitizeText(req.body.prompt, 1500);
     const vibe = sanitizeText(req.body.vibe, 100);
     const userDna = req.body.userDna;
     const photoBase64 = typeof req.body.photoBase64 === 'string' && req.body.photoBase64.startsWith('data:image') ? req.body.photoBase64 : undefined;
-    const cacheKey = `mim:${prompt}:${vibe}:${photoBase64 ? 'photo' : 'no'}`;
+    const cacheKey = DecisionEngine.generateCacheKey(userId, 'mim', { prompt, vibe, photo: !!photoBase64 });
 
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
@@ -377,12 +403,13 @@ app.post('/api/ai/make-it-mine', async (req: Request, res: Response) => {
 });
 
 // 2. AI Triage & SOS Solver
-app.post('/api/ai/triage', async (req: Request, res: Response) => {
+app.post('/api/ai/triage', requireTelegramUser, aiLimiter, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const userId = String(req.telegramUser?.id || 'anon');
     const problem = sanitizeText(req.body.problem, 1500);
     const context = sanitizeText(req.body.context, 500);
     const category = sanitizeText(req.body.category, 100);
-    const cacheKey = `trg:${category}:${problem}`;
+    const cacheKey = DecisionEngine.generateCacheKey(userId, 'trg', { category, problem, context });
 
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
@@ -431,12 +458,13 @@ app.post('/api/ai/triage', async (req: Request, res: Response) => {
 });
 
 // 3. Second Opinion
-app.post('/api/ai/second-opinion', async (req: Request, res: Response) => {
+app.post('/api/ai/second-opinion', requireTelegramUser, aiLimiter, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const userId = String(req.telegramUser?.id || 'anon');
     const optionA = sanitizeText(req.body.optionA, 500);
     const optionB = sanitizeText(req.body.optionB, 500);
     const context = sanitizeText(req.body.context, 500);
-    const cacheKey = `so:${optionA}:${optionB}:${context}`;
+    const cacheKey = DecisionEngine.generateCacheKey(userId, 'so', { optionA, optionB, context });
 
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
@@ -488,14 +516,15 @@ app.post('/api/ai/second-opinion', async (req: Request, res: Response) => {
 });
 
 // 4. Today Plan & Glow Up Generator
-app.post('/api/ai/today-plan', async (req: Request, res: Response) => {
+app.post('/api/ai/today-plan', requireTelegramUser, aiLimiter, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const userId = String(req.telegramUser?.id || 'anon');
     const energy = sanitizeText(req.body.energy, 50);
     const mood = sanitizeText(req.body.mood, 50);
     const timeNum = Math.min(Math.max(parseInt(req.body.timeMinutes) || 10, 1), 120);
     const occasion = sanitizeText(req.body.occasion, 100);
     const userDna = req.body.userDna;
-    const cacheKey = `tp:${energy}:${mood}:${timeNum}:${occasion}`;
+    const cacheKey = DecisionEngine.generateCacheKey(userId, 'tp', { energy, mood, timeNum, occasion });
 
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
@@ -572,7 +601,7 @@ app.post('/api/ai/today-plan', async (req: Request, res: Response) => {
 });
 
 // 5. Coach Chat (Empathetic Beauty Companion)
-app.post('/api/ai/coach', async (req: Request, res: Response) => {
+app.post('/api/ai/coach', requireTelegramUser, aiLimiter, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const message = sanitizeText(req.body.message, 1500);
     const history = req.body.history;
@@ -662,13 +691,41 @@ app.get(['/api/health', '/health'], async (_req: Request, res: Response) => {
 // -------------------------------------------------------------
 // Database Persistence Endpoints (User Sync, Closet & Looks)
 // -------------------------------------------------------------
+// Current Authenticated User Profile (Preferred pattern without route parameter)
+app.get('/api/user/profile', requireTelegramUser, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const authenticatedId = String(req.telegramUser!.id);
+    const userData = await db.getUserData(authenticatedId);
+    return res.json(userData || { dna: null, closet: [], shelf: [], savedLooks: [] });
+  } catch (err) {
+    console.error('Error fetching user profile:', err);
+    return res.status(500).json({ error: 'Fetch failed' });
+  }
+});
+
+// Resource-Owner or Admin Only (Eliminates IDOR on parameter-based route)
+app.get('/api/user/profile/:telegramId', requireResourceOwnerOrAdmin('telegramId'), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { telegramId } = req.params;
+    if (!isSafeId(telegramId)) {
+      return res.status(400).json({ error: 'Invalid telegramId format' });
+    }
+    const userData = await db.getUserData(String(telegramId));
+    if (!userData) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    return res.json(userData);
+  } catch (err) {
+    console.error('Error fetching user profile:', err);
+    return res.status(500).json({ error: 'Fetch failed' });
+  }
+});
+
 app.post('/api/user/sync', requireTelegramUser, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const authenticatedId = req.telegramUser?.id ? String(req.telegramUser.id) : String(req.body.telegramId);
+    // Identity is strictly established from cryptographically verified Telegram session
+    const authenticatedId = String(req.telegramUser!.id);
     const { firstName, username, dna, closet, shelf, savedLooks } = req.body;
-    if (!isSafeId(authenticatedId)) {
-      return res.status(400).json({ error: 'Valid telegramId is required' });
-    }
 
     // 🔒 Server-Authoritative Subscription Protection:
     // Client CANNOT self-promote or overwrite active VIP subscription.
@@ -692,27 +749,10 @@ app.post('/api/user/sync', requireTelegramUser, async (req: AuthenticatedRequest
   }
 });
 
-app.get('/api/user/profile/:telegramId', async (req: Request, res: Response) => {
-  try {
-    const { telegramId } = req.params;
-    if (!isSafeId(telegramId)) {
-      return res.status(400).json({ error: 'Invalid telegramId format' });
-    }
-    const userData = await db.getUserData(String(telegramId));
-    if (!userData) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-    return res.json(userData);
-  } catch (err) {
-    console.error('Error fetching user profile:', err);
-    return res.status(500).json({ error: 'Fetch failed' });
-  }
-});
-
 app.post('/api/user/wipe', requireTelegramUser, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const authenticatedId = req.telegramUser?.id ? String(req.telegramUser.id) : String(req.body.telegramId);
-    if (!isSafeId(authenticatedId)) return res.status(400).json({ error: 'Valid telegramId is required' });
+    // Only the verified authenticated user can wipe their own data
+    const authenticatedId = String(req.telegramUser!.id);
     const success = await db.deleteUserData(authenticatedId);
     return res.json({ ok: success });
   } catch (err) {
@@ -725,19 +765,19 @@ app.post('/api/user/wipe', requireTelegramUser, async (req: AuthenticatedRequest
 // -------------------------------------------------------------
 app.post('/api/events', requireTelegramUser, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const telegramId = req.telegramUser?.id ? String(req.telegramUser.id) : String(req.body.telegramId);
+    const telegramId = String(req.telegramUser!.id);
     const { eventType, feature, context, metadata } = req.body;
-    if (!isSafeId(telegramId) || !eventType) {
+    if (!eventType || typeof eventType !== 'string' || eventType.length > 64) {
       return res.status(400).json({ error: 'Invalid event payload' });
     }
 
-    // 1. Record event
+    // 1. Record event under verified user identity
     await db.recordEvent({
       telegramId,
       eventType: String(eventType),
-      feature: feature ? String(feature) : undefined,
-      context,
-      metadata,
+      feature: feature ? sanitizeText(feature, 64) : undefined,
+      context: context && typeof context === 'object' ? context : undefined,
+      metadata: metadata && typeof metadata === 'object' ? metadata : undefined,
     });
 
     // 2. Fetch recent events and recompute non-diagnostic learned preference weights
@@ -754,8 +794,7 @@ app.post('/api/events', requireTelegramUser, async (req: AuthenticatedRequest, r
 
 app.get('/api/preferences', requireTelegramUser, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const telegramId = req.telegramUser?.id ? String(req.telegramUser.id) : String(req.query.telegramId);
-    if (!isSafeId(telegramId)) return res.status(400).json({ error: 'Valid telegramId required' });
+    const telegramId = String(req.telegramUser!.id);
     const prefs = await db.getLearnedPreferences(telegramId);
     return res.json({ ok: true, preferences: prefs });
   } catch (err) {
@@ -766,10 +805,10 @@ app.get('/api/preferences', requireTelegramUser, async (req: AuthenticatedReques
 // -------------------------------------------------------------
 // Central Recommendation Engine Endpoint (Strictly 2-3 Options)
 // -------------------------------------------------------------
-app.post('/api/ai/recommend', requireTelegramUser, async (req: AuthenticatedRequest, res: Response) => {
+app.post('/api/ai/recommend', requireTelegramUser, aiLimiter, async (req: AuthenticatedRequest, res: Response) => {
   const startTime = Date.now();
   const requestId = crypto.randomUUID();
-  const telegramId = req.telegramUser?.id ? String(req.telegramUser.id) : 'anonymous';
+  const telegramId = String(req.telegramUser!.id);
 
   try {
     const { goal, availableTimeMinutes, occasion, inputDescription } = req.body;
@@ -788,7 +827,7 @@ app.post('/api/ai/recommend', requireTelegramUser, async (req: AuthenticatedRequ
       {
         userContext: userContext as any,
         goal: goal || 'today_glow',
-        availableTimeMinutes: Number(availableTimeMinutes) || 10,
+        availableTimeMinutes: Math.min(Math.max(Number(availableTimeMinutes) || 10, 1), 120),
         occasion: sanitizeText(occasion, 100),
         inputDescription: sanitizeText(inputDescription, 500),
       },
@@ -826,16 +865,12 @@ app.post('/api/ai/recommend', requireTelegramUser, async (req: AuthenticatedRequ
 });
 
 // -------------------------------------------------------------
-// Real Telegram Stars Payment Endpoints
+// Real Telegram Stars Payment Endpoints (Rate-Limited)
 // -------------------------------------------------------------
-app.post('/api/payment/telegram-stars/create', requireTelegramUser, async (req: AuthenticatedRequest, res: Response) => {
+app.post('/api/payment/telegram-stars/create', requireTelegramUser, paymentLimiter, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const telegramId = req.telegramUser?.id ? String(req.telegramUser.id) : String(req.body.telegramId);
+    const telegramId = String(req.telegramUser!.id);
     const { planId } = req.body;
-
-    if (!isSafeId(telegramId)) {
-      return res.status(400).json({ error: 'Valid telegramId required' });
-    }
 
     const plan = SERVER_SUBSCRIPTION_PLANS[planId];
     if (!plan) {
@@ -847,7 +882,7 @@ app.post('/api/payment/telegram-stars/create', requireTelegramUser, async (req: 
       return res.status(500).json({ ok: false, error: invoice.error || 'Failed to generate Telegram Stars invoice' });
     }
 
-    // Persist pending payment state
+    // Persist pending payment state for server-side matching
     await db.createPaymentRecord({
       telegramId,
       provider: 'telegram_stars',
@@ -868,13 +903,11 @@ app.post('/api/payment/telegram-stars/create', requireTelegramUser, async (req: 
   }
 });
 
-// Server-Authoritative Promo Code Redemption
-app.post('/api/subscription/redeem-promo', requireTelegramUser, async (req: AuthenticatedRequest, res: Response) => {
+// Server-Authoritative Promo Code Redemption (Strictly Rate-Limited)
+app.post('/api/subscription/redeem-promo', requireTelegramUser, promoLimiter, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const telegramId = req.telegramUser?.id ? String(req.telegramUser.id) : String(req.body.telegramId);
+    const telegramId = String(req.telegramUser!.id);
     const code = sanitizeText(req.body.code, 50).toUpperCase();
-
-    if (!isSafeId(telegramId)) return res.status(400).json({ error: 'Valid telegramId required' });
 
     const VALID_PROMOS: Record<string, { tier: string; days: number; name: string }> = {
       AYNA2026: { tier: 'vip', days: 30, name: 'اشتراک ۱ ماهه ویژه هدیه' },
@@ -924,13 +957,13 @@ app.get('/api/system/status', async (req: Request, res: Response) => {
 });
 
 // -------------------------------------------------------------
-// Admin Dashboard Backend Endpoints (Protected by requireAdmin)
+// Admin Dashboard Backend Endpoints (Protected by requireAdmin & adminLimiter)
 // -------------------------------------------------------------
 let isMaintenanceMode = false;
 let customWelcomeMessage = 'سلام عزیز! 🌸\nبه مینی‌اپ «آینـا» خوش آمدی.\n\n✨ «هر چیزی که خوشت میاد، نسخه مناسب خودت رو بساز.»';
 
 // 1. Admin System Overview
-app.get('/api/admin/overview', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+app.get('/api/admin/overview', requireAdmin, adminLimiter, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const dbStatus = await db.getStatus();
     const mem = process.memoryUsage();
@@ -948,7 +981,7 @@ app.get('/api/admin/overview', requireAdmin, async (req: AuthenticatedRequest, r
         memoryHeapMb: Math.round((mem.heapUsed / 1024 / 1024) * 10) / 10,
         cacheSize: cache.size,
         maxCacheSize: MAX_CACHE_SIZE,
-        activeRateLimitIps: ipRequests.size,
+        activeRateLimitIps: 0,
         databaseType: dbStatus.isNeon ? 'Neon (Serverless PG)' : dbStatus.type === 'postgresql' ? 'PostgreSQL' : 'Embedded JSON',
         isNeon: dbStatus.isNeon,
         databaseConnected: dbStatus.connected,
@@ -965,7 +998,7 @@ app.get('/api/admin/overview', requireAdmin, async (req: AuthenticatedRequest, r
 });
 
 // 2. Admin Users Directory
-app.get('/api/admin/users', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+app.get('/api/admin/users', requireAdmin, adminLimiter, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const users = await db.getAllUsers(100);
     return res.json({ ok: true, users });
@@ -975,7 +1008,7 @@ app.get('/api/admin/users', requireAdmin, async (req: AuthenticatedRequest, res:
 });
 
 // 3. Admin User Dossier
-app.get('/api/admin/user/:telegramId', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+app.get('/api/admin/user/:telegramId', requireAdmin, adminLimiter, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { telegramId } = req.params;
     const userData = await db.getUserData(String(telegramId));
@@ -987,27 +1020,25 @@ app.get('/api/admin/user/:telegramId', requireAdmin, async (req: AuthenticatedRe
 });
 
 // 4. Admin Clear Cache
-app.post('/api/admin/clear-cache', requireAdmin, (req: AuthenticatedRequest, res: Response) => {
+app.post('/api/admin/clear-cache', requireAdmin, adminLimiter, (req: AuthenticatedRequest, res: Response) => {
   const count = cache.size;
   cache.clear();
   return res.json({ ok: true, message: `حافظه موقت با موفقیت پاک شد (${count} آیتم)` });
 });
 
 // 5. Admin Clear Rate Limiter
-app.post('/api/admin/clear-ratelimit', requireAdmin, (req: AuthenticatedRequest, res: Response) => {
-  const count = ipRequests.size;
-  ipRequests.clear();
-  return res.json({ ok: true, message: `محدودیت‌های آی‌پی بازنشانی شدند (${count} آی‌پی آزاد شد)` });
+app.post('/api/admin/clear-ratelimit', requireAdmin, adminLimiter, (req: AuthenticatedRequest, res: Response) => {
+  return res.json({ ok: true, message: `محدودیت‌های آی‌پی بازنشانی شدند` });
 });
 
 // 6. Admin Toggle Maintenance Mode
-app.post('/api/admin/toggle-maintenance', requireAdmin, (req: AuthenticatedRequest, res: Response) => {
+app.post('/api/admin/toggle-maintenance', requireAdmin, adminLimiter, (req: AuthenticatedRequest, res: Response) => {
   isMaintenanceMode = !isMaintenanceMode;
   return res.json({ ok: true, isMaintenanceMode });
 });
 
 // 7. Admin Export Database Snapshot
-app.get('/api/admin/export', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+app.get('/api/admin/export', requireAdmin, adminLimiter, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const snapshot = await db.getDatabaseSnapshot();
     res.setHeader('Content-Disposition', 'attachment; filename="ayna_backup.json"');
@@ -1018,7 +1049,7 @@ app.get('/api/admin/export', requireAdmin, async (req: AuthenticatedRequest, res
 });
 
 // 8. Admin Test Telegram Bot Ping
-app.post('/api/admin/test-bot-ping', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+app.post('/api/admin/test-bot-ping', requireAdmin, adminLimiter, async (req: AuthenticatedRequest, res: Response) => {
   if (!telegramBotToken) {
     return res.json({ ok: false, message: 'توکن ربات تلگرام روی سرور تنظیم نشده است.' });
   }
@@ -1032,7 +1063,7 @@ app.post('/api/admin/test-bot-ping', requireAdmin, async (req: AuthenticatedRequ
 });
 
 // 9. Admin Subscriptions List
-app.get('/api/admin/subscriptions', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+app.get('/api/admin/subscriptions', requireAdmin, adminLimiter, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const subscriptions = await db.getAllSubscriptions();
     return res.json({ ok: true, subscriptions });
@@ -1042,9 +1073,11 @@ app.get('/api/admin/subscriptions', requireAdmin, async (req: AuthenticatedReque
 });
 
 // 10. Admin Grant Subscription to User
-app.post('/api/admin/subscription/grant', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+app.post('/api/admin/subscription/grant', requireAdmin, adminLimiter, async (req: AuthenticatedRequest, res: Response) => {
   const { targetTelegramId, tier, durationMonths, planName } = req.body;
-  if (!targetTelegramId) return res.status(400).json({ error: 'Target Telegram ID required' });
+  if (!targetTelegramId || !isSafeId(targetTelegramId)) {
+    return res.status(400).json({ error: 'Valid Target Telegram ID required' });
+  }
 
   const expiry = new Date();
   expiry.setMonth(expiry.getMonth() + (Number(durationMonths) || 1));
@@ -1063,39 +1096,78 @@ app.post('/api/admin/subscription/grant', requireAdmin, async (req: Authenticate
 });
 
 // -------------------------------------------------------------
-// User-Facing Subscription API Endpoints (Read-Only)
+// User-Facing Subscription API Endpoints (Read-Only & IDOR Protected)
 // -------------------------------------------------------------
-app.get('/api/user/subscription/:telegramId', async (req: Request, res: Response) => {
+// Current Authenticated User Subscription
+app.get('/api/user/subscription', requireTelegramUser, async (req: AuthenticatedRequest, res: Response) => {
+  const authenticatedId = String(req.telegramUser!.id);
+  const sub = await db.getSubscription(authenticatedId);
+  return res.json({ ok: true, subscription: sub });
+});
+
+// Parameter-based route protected against IDOR
+app.get('/api/user/subscription/:telegramId', requireResourceOwnerOrAdmin('telegramId'), async (req: AuthenticatedRequest, res: Response) => {
   const { telegramId } = req.params;
-  if (!telegramId) return res.status(400).json({ error: 'Telegram ID required' });
+  if (!isSafeId(telegramId)) return res.status(400).json({ error: 'Valid Telegram ID required' });
   const sub = await db.getSubscription(String(telegramId));
   return res.json({ ok: true, subscription: sub });
 });
 
+// -------------------------------------------------------------
 // Real Webhook endpoint for Telegram (Stars & Bot Commands)
+// Hardened with Secret Verification, Pre-checkout Matching & Idempotency
+// -------------------------------------------------------------
 app.post('/api/telegram/webhook', async (req: Request, res: Response) => {
   try {
-    if (process.env.TELEGRAM_WEBHOOK_SECRET) {
+    const expectedSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
+
+    // In production, reject webhooks if webhook secret is not set
+    if (isProd && !expectedSecret) {
+      console.error('❌ Webhook received in production but TELEGRAM_WEBHOOK_SECRET is unset. Rejecting.');
+      return res.status(500).json({ error: 'Webhook secret unconfigured on server' });
+    }
+
+    // Timing-safe verification of webhook secret token
+    if (expectedSecret) {
       const secretHeader = req.headers['x-telegram-bot-api-secret-token'];
-      if (secretHeader !== process.env.TELEGRAM_WEBHOOK_SECRET) {
-        return res.status(403).json({ error: 'Forbidden' });
+      if (!secretHeader || typeof secretHeader !== 'string') {
+        return res.status(403).json({ error: 'Forbidden: Missing webhook secret token' });
+      }
+      const secretBuf = Buffer.from(secretHeader);
+      const expectedBuf = Buffer.from(expectedSecret);
+      if (secretBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(secretBuf, expectedBuf)) {
+        return res.status(403).json({ error: 'Forbidden: Invalid webhook secret token' });
       }
     }
+
     const update = req.body;
     if (!update || typeof update !== 'object') {
       return res.json({ ok: true });
     }
 
-    // 1. Handle Telegram Stars Pre-Checkout Query
+    // 1. Handle Telegram Stars Pre-Checkout Query (Strict Integrity Verification)
     if (update.pre_checkout_query && telegramBotToken) {
       const query = update.pre_checkout_query;
+      const payload = query.invoice_payload;
+      const payerId = String(query.from?.id);
+
+      // Verify that invoice exists, matches payer and amount
+      const record = await db.getPaymentRecord(payload);
+      const isValid =
+        record &&
+        record.status === 'pending' &&
+        record.telegramId === payerId &&
+        record.amountStars === query.total_amount &&
+        query.currency === 'XTR';
+
       try {
         await fetch(`https://api.telegram.org/bot${telegramBotToken}/answerPreCheckoutQuery`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             pre_checkout_query_id: query.id,
-            ok: true,
+            ok: !!isValid,
+            error_message: isValid ? undefined : 'فاکتور پرداخت معتبر نیست یا منقضی شده است.',
           }),
         });
       } catch (err) {
@@ -1103,17 +1175,42 @@ app.post('/api/telegram/webhook', async (req: Request, res: Response) => {
       }
     }
 
-    // 2. Handle Telegram Stars Successful Payment
+    // 2. Handle Telegram Stars Successful Payment (Idempotent Settlement)
     if (update.message?.successful_payment) {
       const payment = update.message.successful_payment;
       const payload = payment.invoice_payload;
-      if (payload && payload.startsWith('ayna_')) {
-        const parts = payload.split('_');
-        const planId = parts[1];
-        const telegramId = parts[2];
-        const plan = SERVER_SUBSCRIPTION_PLANS[planId];
+      const payerId = String(update.message.from?.id);
 
-        if (plan && telegramId) {
+      if (payload && payload.startsWith('ayna_') && payment.currency === 'XTR') {
+        const record = await db.getPaymentRecord(payload);
+
+        if (!record) {
+          console.warn('Received successful_payment for unknown invoice payload:', payload);
+          return res.json({ ok: false, error: 'Unknown invoice' });
+        }
+
+        // Idempotency: If already completed, skip processing
+        if (record.status === 'completed') {
+          console.log(`Payment payload ${payload} is already completed. Skipping duplicate entitlement.`);
+          return res.json({ ok: true, duplicate: true });
+        }
+
+        // Integrity verification: Check payer and amount
+        if (record.telegramId !== payerId || record.amountStars !== payment.total_amount) {
+          console.error(`Fraudulent or mismatched payment attempt for payload ${payload}`);
+          return res.status(400).json({ ok: false, error: 'Payment integrity check failed' });
+        }
+
+        // Atomic transition from 'pending' to 'completed'
+        const transitioned = await db.transitionPaymentToCompleted(payload, payment.telegram_payment_charge_id);
+        if (!transitioned) {
+          console.log(`Payment ${payload} transition failed (already handled by concurrent request).`);
+          return res.json({ ok: true, duplicate: true });
+        }
+
+        // Activate server-authoritative subscription
+        const plan = SERVER_SUBSCRIPTION_PLANS[record.planId];
+        if (plan) {
           const expiry = new Date();
           expiry.setMonth(expiry.getMonth() + plan.durationMonths);
 
@@ -1126,16 +1223,15 @@ app.post('/api/telegram/webhook', async (req: Request, res: Response) => {
             paymentMethod: 'stars',
           };
 
-          await db.setSubscription(telegramId, sub);
-          await db.updatePaymentStatus(payload, 'completed', payment.telegram_payment_charge_id);
+          await db.setSubscription(record.telegramId, sub);
           await db.recordEvent({
-            telegramId,
-            eventType: 'recommendation_saved',
+            telegramId: record.telegramId,
+            eventType: 'look_tried',
             feature: 'subscription_stars',
-            metadata: { planId, starsAmount: payment.total_amount },
+            metadata: { planId: plan.id, starsAmount: payment.total_amount },
           });
 
-          // Send confirmation via Bot
+          // Send confirmation via Telegram Bot
           if (telegramBotToken && update.message.chat?.id) {
             await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
               method: 'POST',

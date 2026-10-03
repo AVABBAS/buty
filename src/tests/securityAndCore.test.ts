@@ -156,7 +156,7 @@ async function runAllTests() {
   // TEST 9: Recommendation Engine - Curated 2-3 Option Rule & Safety
   // -------------------------------------------------------------
   console.log('🧪 TEST 9: Verifying Curated 2-3 Options Rule & Anxiety Safety...');
-  const decisionEngine = new DecisionEngine();
+  const decisionEngine = new DecisionEngine('offline');
   const recResponse = await decisionEngine.recommend({
     userContext: {
       identity: { telegramId: 'user1' },

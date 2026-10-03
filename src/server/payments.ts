@@ -79,10 +79,11 @@ export class TelegramStarsProvider implements PaymentProvider {
     const invoicePayload = `ayna_${plan.id}_${telegramId}_${Date.now()}_${nonce}`;
 
     try {
-      // Call Telegram Bot API createInvoiceLink
+      // Call Telegram Bot API createInvoiceLink with timeout guard
       const response = await fetch(`https://api.telegram.org/bot${this.botToken}/createInvoiceLink`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(5000),
         body: JSON.stringify({
           title: `آینـا: ${plan.name}`,
           description: `دسترسی نامحدود به استودیوهای هوش مصنوعی، آنالیز کمد و مشاور زیبایی آینـا برای ${plan.durationMonths} ماه`,

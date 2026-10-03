@@ -65,12 +65,13 @@ export const AdminTab: React.FC<AdminTabProps> = ({ adminId, adminUsername, onNa
   const getAdminHeaders = (): Record<string, string> => {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      'x-admin-id': adminId || '291775184',
-      'x-admin-username': adminUsername || 'av_abbas',
     };
     if (typeof window !== 'undefined' && window.Telegram?.WebApp?.initData) {
       headers['Authorization'] = `Bearer ${window.Telegram.WebApp.initData}`;
       headers['x-telegram-init-data'] = window.Telegram.WebApp.initData;
+    } else if (import.meta.env.DEV) {
+      headers['x-dev-mock-telegram-id'] = adminId || '291775184';
+      headers['x-dev-mock-username'] = adminUsername || 'av_abbas';
     }
     return headers;
   };

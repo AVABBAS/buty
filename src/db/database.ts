@@ -826,6 +826,44 @@ class DatabaseService {
     return false;
   }
 
+  /**
+   * Atomically transitions a pending payment to completed.
+   * Enforces idempotency: Returns true only if status changed from 'pending' to 'completed'.
+   * If already 'completed' or not found, returns false.
+   */
+  async transitionPaymentToCompleted(invoicePayload: string, chargeId?: string): Promise<boolean> {
+    if (!invoicePayload) return false;
+
+    if (this.isPostgres && this.pgPool) {
+      try {
+        const res = await this.pgPool.query(
+          `UPDATE ayna_payments
+           SET status = 'completed',
+               telegram_payment_charge_id = COALESCE($1, telegram_payment_charge_id),
+               updated_at = NOW()
+           WHERE invoice_payload = $2 AND status = 'pending'`,
+          [chargeId || null, invoicePayload]
+        );
+        return (res.rowCount ?? 0) > 0;
+      } catch (err) {
+        console.error('PostgreSQL transitionPaymentToCompleted error:', err);
+        return false;
+      }
+    }
+
+    if (this.embeddedData.payments[invoicePayload]) {
+      const rec = this.embeddedData.payments[invoicePayload];
+      if (rec.status === 'pending') {
+        rec.status = 'completed';
+        if (chargeId) rec.telegramPaymentChargeId = chargeId;
+        rec.updatedAt = new Date().toISOString();
+        this.saveEmbeddedData();
+        return true;
+      }
+    }
+    return false;
+  }
+
   async getPaymentRecord(invoicePayload: string): Promise<any | null> {
     if (!invoicePayload) return null;
 

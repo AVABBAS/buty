@@ -27,6 +27,10 @@ export class DecisionEngine {
   private ai: GoogleGenAI | null = null;
 
   constructor(apiKey?: string) {
+    if (apiKey === 'offline') {
+      this.ai = null;
+      return;
+    }
     const key = apiKey || process.env.GEMINI_API_KEY;
     if (key) {
       this.ai = new GoogleGenAI({
@@ -37,6 +41,18 @@ export class DecisionEngine {
           },
         },
       });
+    }
+  }
+
+  private async runWithTimeout<T>(promise: Promise<T>, timeoutMs = 6000): Promise<T> {
+    let timer: any;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`AI generation timed out after ${timeoutMs}ms`)), timeoutMs);
+    });
+    try {
+      return await Promise.race([promise, timeoutPromise]);
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -142,15 +158,18 @@ export class DecisionEngine {
 
         parts.push({ text: promptText });
 
-        const response = await this.ai.models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: parts,
-          config: {
-            systemInstruction: systemPrompt,
-            responseMimeType: 'application/json',
-            temperature: 0.25,
-          },
-        });
+        const response = await this.runWithTimeout(
+          this.ai.models.generateContent({
+            model: 'gemini-3.8-flash',
+            contents: parts,
+            config: {
+              systemInstruction: systemPrompt,
+              responseMimeType: 'application/json',
+              temperature: 0.25,
+            },
+          }),
+          5000
+        );
 
         const text = response.text?.trim();
         if (text) {
@@ -228,19 +247,22 @@ export class DecisionEngine {
 
     if (this.ai) {
       try {
-        const response = await this.ai.models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: [
-            {
-              text: `فرم صورت: ${dna.faceShape}، زمان در دسترس: ${time} دقیقه، موقعیت: ${occasion}، ترجیح رنگی: ${weights?.neutralColorWeight && weights.neutralColorWeight > 0 ? 'خنثی‌پسند' : 'متعادل'}`
-            }
-          ],
-          config: {
-            systemInstruction: systemPrompt,
-            responseMimeType: 'application/json',
-            temperature: 0.3,
-          },
-        });
+        const response = await this.runWithTimeout(
+          this.ai.models.generateContent({
+            model: 'gemini-3.8-flash',
+            contents: [
+              {
+                text: `فرم صورت: ${dna.faceShape}، زمان در دسترس: ${time} دقیقه، موقعیت: ${occasion}، ترجیح رنگی: ${weights?.neutralColorWeight && weights.neutralColorWeight > 0 ? 'خنثی‌پسند' : 'متعادل'}`
+              }
+            ],
+            config: {
+              systemInstruction: systemPrompt,
+              responseMimeType: 'application/json',
+              temperature: 0.3,
+            },
+          }),
+          5000
+        );
 
         const text = response.text?.trim();
         if (text) {
@@ -310,15 +332,18 @@ export class DecisionEngine {
 
     if (this.ai) {
       try {
-        const response = await this.ai.models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: [{ text: `مشکل: ${problem}\nموقعیت و زمان: ${context}\nدسته‌بندی: ${category}` }],
-          config: {
-            systemInstruction: systemPrompt,
-            responseMimeType: 'application/json',
-            temperature: 0.2,
-          },
-        });
+        const response = await this.runWithTimeout(
+          this.ai.models.generateContent({
+            model: 'gemini-3.8-flash',
+            contents: [{ text: `مشکل: ${problem}\nموقعیت و زمان: ${context}\nدسته‌بندی: ${category}` }],
+            config: {
+              systemInstruction: systemPrompt,
+              responseMimeType: 'application/json',
+              temperature: 0.2,
+            },
+          }),
+          5000
+        );
 
         const text = response.text?.trim();
         if (text) return JSON.parse(text);

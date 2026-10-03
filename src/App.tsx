@@ -98,23 +98,29 @@ export default function App() {
   const handleActivateSubscription = (sub: UserSubscription) => {
     setUserSubscription(sub);
     safeStorage.set('ayna_subscription', sub);
-    if (tgUserId) {
-      fetch('/api/user/subscription', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ telegramId: tgUserId, subscription: sub }),
-      }).catch(() => {});
-    }
+    // Re-verify and refresh authoritative subscription from server
+    fetch('/api/user/subscription', {
+      headers: getAuthHeaders(),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.subscription) {
+          setUserSubscription(data.subscription);
+          safeStorage.set('ayna_subscription', data.subscription);
+        }
+      })
+      .catch(() => {});
   };
 
-  // Dedicated Admin Identification for Telegram ID 291775184 and @Av_abbas
+  // Dedicated Admin Identification strictly anchored to Telegram ID 291775184
   const ADMIN_ID = '291775184';
   const ADMIN_USERNAME = 'av_abbas';
 
   const isUserAdmin = Boolean(
     (tgUserId && String(tgUserId) === ADMIN_ID) ||
     (tgUsername && tgUsername.toLowerCase().replace('@', '') === ADMIN_USERNAME) ||
-    (typeof window !== 'undefined' &&
+    (import.meta.env.DEV &&
+      typeof window !== 'undefined' &&
       (new URLSearchParams(window.location.search).get('admin') === 'true' ||
        safeStorage.get('ayna_simulated_admin', false)))
   );
@@ -204,9 +210,10 @@ export default function App() {
         const idStr = String(user.id);
         setTgUserId(idStr);
 
-        // Fetch remote data from DB with hydration race-condition prevention
+        // Fetch remote data from DB with auth headers and hydration race-condition prevention
+        const authHeaders = getAuthHeaders();
         Promise.allSettled([
-          fetch(`/api/user/profile/${idStr}`)
+          fetch('/api/user/profile', { headers: authHeaders })
             .then((res) => (res.ok ? res.json() : null))
             .then((data) => {
               if (data) {
@@ -216,7 +223,7 @@ export default function App() {
                 if (Array.isArray(data.savedLooks) && data.savedLooks.length > 0) setSavedLooks(data.savedLooks);
               }
             }),
-          fetch(`/api/user/subscription/${idStr}`)
+          fetch('/api/user/subscription', { headers: authHeaders })
             .then((res) => (res.ok ? res.json() : null))
             .then((data) => {
               if (data?.subscription) {
