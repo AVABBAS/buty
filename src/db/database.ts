@@ -28,6 +28,7 @@ export interface DbStatus {
   connected: boolean;
   totalUsers: number;
   totalLooks: number;
+  isNeon?: boolean;
 }
 
 // -------------------------------------------------------------
@@ -72,13 +73,39 @@ class DatabaseService {
 
     if (dbUrl && (dbUrl.startsWith('postgres://') || dbUrl.startsWith('postgresql://'))) {
       try {
+        const isNeon = dbUrl.includes('neon.tech');
+        const isRemote = !dbUrl.includes('localhost') && !dbUrl.includes('127.0.0.1');
+        const requiresSsl = isNeon || dbUrl.includes('sslmode=require') || isRemote;
+
         this.pgPool = new Pool({
           connectionString: dbUrl,
-          ssl: process.env.NODE_ENV === 'production' && !dbUrl.includes('localhost') ? { rejectUnauthorized: false } : undefined,
-          max: 20, // High-concurrency connection pool
+          ssl: requiresSsl ? { rejectUnauthorized: false } : undefined,
+          max: Number(process.env.PG_MAX_POOL) || 20, // Neon recommended pooling for serverless
           idleTimeoutMillis: 30000,
-          connectionTimeoutMillis: 5000,
+          connectionTimeoutMillis: 10000, // 10s gives Neon time to wake up compute from sleep
         });
+
+        // Prevent idle client errors from crashing the process
+        this.pgPool.on('error', (err: any) => {
+          console.warn('⚠️ Unexpected PostgreSQL pool client error (Neon auto-recovery):', err?.message || err);
+        });
+
+        // Test connection with retry (useful if Neon is waking up from scale-to-zero)
+        let connected = false;
+        let attempts = 0;
+        const maxAttempts = 3;
+
+        while (!connected && attempts < maxAttempts) {
+          try {
+            attempts++;
+            await this.pgPool.query('SELECT 1');
+            connected = true;
+          } catch (connErr) {
+            console.warn(`⏳ Waiting for PostgreSQL/Neon database to respond (attempt ${attempts}/${maxAttempts})...`);
+            if (attempts >= maxAttempts) throw connErr;
+            await new Promise((res) => setTimeout(res, 2000));
+          }
+        }
 
         // Test connection, create tables and high-speed indexes
         await this.pgPool.query(`
@@ -95,15 +122,30 @@ class DatabaseService {
             closet JSONB,
             shelf JSONB,
             saved_looks JSONB,
+            subscription JSONB,
+            updated_at TIMESTAMP DEFAULT NOW()
+          );
+
+          ALTER TABLE ayna_user_data ADD COLUMN IF NOT EXISTS subscription JSONB;
+
+          CREATE TABLE IF NOT EXISTS ayna_subscriptions (
+            telegram_id VARCHAR(64) PRIMARY KEY,
+            tier VARCHAR(32) NOT NULL,
+            is_active BOOLEAN DEFAULT TRUE,
+            plan_name TEXT,
+            payment_method VARCHAR(32),
+            expires_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT NOW(),
             updated_at TIMESTAMP DEFAULT NOW()
           );
 
           CREATE INDEX IF NOT EXISTS idx_ayna_users_last_active ON ayna_users(last_active);
           CREATE INDEX IF NOT EXISTS idx_ayna_user_data_updated ON ayna_user_data(updated_at);
+          CREATE INDEX IF NOT EXISTS idx_ayna_subscriptions_active ON ayna_subscriptions(is_active);
         `);
 
         this.isPostgres = true;
-        console.log('✅ Connected to PostgreSQL database successfully with connection pooling and indexes!');
+        console.log(`✅ Connected to ${isNeon ? 'Neon Serverless PostgreSQL' : 'PostgreSQL'} database successfully with connection pooling and indexes!`);
         return;
       } catch (err) {
         console.warn('⚠️ PostgreSQL connection failed, falling back to embedded persistent database:', err);
@@ -267,9 +309,16 @@ class DatabaseService {
           connected: true,
           totalUsers: parseInt(usersCountRes.rows[0]?.count || '0', 10),
           totalLooks: parseInt(looksCountRes.rows[0]?.total || '0', 10),
+          isNeon: Boolean(process.env.DATABASE_URL?.includes('neon.tech')),
         };
       } catch {
-        return { type: 'postgresql', connected: false, totalUsers: 0, totalLooks: 0 };
+        return {
+          type: 'postgresql',
+          connected: false,
+          totalUsers: 0,
+          totalLooks: 0,
+          isNeon: Boolean(process.env.DATABASE_URL?.includes('neon.tech')),
+        };
       }
     }
 
@@ -292,6 +341,7 @@ class DatabaseService {
 
     if (this.isPostgres && this.pgPool) {
       try {
+        await this.pgPool.query(`DELETE FROM ayna_subscriptions WHERE telegram_id = $1`, [telegramId]);
         await this.pgPool.query(`DELETE FROM ayna_user_data WHERE telegram_id = $1`, [telegramId]);
         await this.pgPool.query(`DELETE FROM ayna_users WHERE telegram_id = $1`, [telegramId]);
         return true;
@@ -306,6 +356,7 @@ class DatabaseService {
     delete this.embeddedData.closet[telegramId];
     delete this.embeddedData.shelf[telegramId];
     delete this.embeddedData.savedLooks[telegramId];
+    delete this.embeddedData.subscriptions[telegramId];
     this.saveEmbeddedData();
     return true;
   }
@@ -381,6 +432,44 @@ class DatabaseService {
 
   async setSubscription(telegramId: string, subscription: any): Promise<boolean> {
     if (!isSafeId(telegramId)) return false;
+
+    if (this.isPostgres && this.pgPool) {
+      try {
+        await this.pgPool.query(
+          `INSERT INTO ayna_subscriptions (telegram_id, tier, is_active, plan_name, payment_method, expires_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, NOW())
+           ON CONFLICT (telegram_id) DO UPDATE SET
+             tier = $2,
+             is_active = $3,
+             plan_name = $4,
+             payment_method = $5,
+             expires_at = $6,
+             updated_at = NOW()`,
+          [
+            telegramId,
+            subscription.tier || 'vip',
+            subscription.isActive !== false,
+            subscription.planName || null,
+            subscription.paymentMethod || null,
+            subscription.expiresAt ? new Date(subscription.expiresAt) : null,
+          ]
+        );
+
+        await this.pgPool.query(
+          `INSERT INTO ayna_user_data (telegram_id, subscription, updated_at)
+           VALUES ($1, $2, NOW())
+           ON CONFLICT (telegram_id) DO UPDATE SET
+             subscription = $2,
+             updated_at = NOW()`,
+          [telegramId, JSON.stringify(subscription)]
+        );
+        return true;
+      } catch (err) {
+        console.error('PostgreSQL setSubscription error:', err);
+        return false;
+      }
+    }
+
     this.embeddedData.subscriptions[telegramId] = subscription;
     this.saveEmbeddedData();
     return true;
@@ -388,10 +477,69 @@ class DatabaseService {
 
   async getSubscription(telegramId: string): Promise<any | null> {
     if (!isSafeId(telegramId)) return null;
+
+    if (this.isPostgres && this.pgPool) {
+      try {
+        const res = await this.pgPool.query(
+          `SELECT subscription FROM ayna_user_data WHERE telegram_id = $1`,
+          [telegramId]
+        );
+        if (res.rows[0]?.subscription) {
+          return res.rows[0].subscription;
+        }
+        const subRes = await this.pgPool.query(
+          `SELECT * FROM ayna_subscriptions WHERE telegram_id = $1`,
+          [telegramId]
+        );
+        if (subRes.rows[0]) {
+          const row = subRes.rows[0];
+          return {
+            tier: row.tier,
+            isActive: row.is_active,
+            expiresAt: row.expires_at ? new Date(row.expires_at).toISOString() : undefined,
+            planName: row.plan_name,
+            paymentMethod: row.payment_method,
+          };
+        }
+        return null;
+      } catch (err) {
+        console.error('PostgreSQL getSubscription error:', err);
+        return null;
+      }
+    }
+
     return this.embeddedData.subscriptions[telegramId] || null;
   }
 
   async getAllSubscriptions(): Promise<Array<{ telegramId: string; subscription: any; user?: any }>> {
+    if (this.isPostgres && this.pgPool) {
+      try {
+        const res = await this.pgPool.query(
+          `SELECT s.*, u.first_name, u.username
+           FROM ayna_subscriptions s
+           LEFT JOIN ayna_users u ON s.telegram_id = u.telegram_id
+           ORDER BY s.updated_at DESC`
+        );
+        return res.rows.map((row: any) => ({
+          telegramId: row.telegram_id,
+          subscription: {
+            tier: row.tier,
+            isActive: row.is_active,
+            expiresAt: row.expires_at ? new Date(row.expires_at).toISOString() : undefined,
+            planName: row.plan_name,
+            paymentMethod: row.payment_method,
+          },
+          user: {
+            firstName: row.first_name,
+            username: row.username,
+          },
+        }));
+      } catch (err) {
+        console.error('PostgreSQL getAllSubscriptions error:', err);
+        return [];
+      }
+    }
+
     return Object.entries(this.embeddedData.subscriptions).map(([id, sub]) => ({
       telegramId: id,
       subscription: sub,

@@ -598,6 +598,25 @@ app.get('/api/telegram/config', (req: Request, res: Response) => {
 });
 
 // -------------------------------------------------------------
+// Railway / Cloud Health Check
+// -------------------------------------------------------------
+app.get(['/api/health', '/health'], async (_req: Request, res: Response) => {
+  const dbStatus = await db.getStatus();
+  return res.status(200).json({
+    status: 'ok',
+    environment: isProd ? 'production' : 'development',
+    uptimeSeconds: Math.round(process.uptime()),
+    timestamp: new Date().toISOString(),
+    database: {
+      type: dbStatus.type,
+      connected: dbStatus.connected,
+      totalUsers: dbStatus.totalUsers,
+    },
+    platform: 'Railway + Neon Ready'
+  });
+});
+
+// -------------------------------------------------------------
 // Database Persistence Endpoints (User Sync, Closet & Looks)
 // -------------------------------------------------------------
 app.post('/api/user/sync', async (req: Request, res: Response) => {
@@ -705,7 +724,8 @@ app.get('/api/admin/overview', async (req: Request, res: Response) => {
         cacheSize: cache.size,
         maxCacheSize: MAX_CACHE_SIZE,
         activeRateLimitIps: ipRequests.size,
-        databaseType: dbStatus.type,
+        databaseType: dbStatus.isNeon ? 'Neon (Serverless PG)' : dbStatus.type === 'postgresql' ? 'PostgreSQL' : 'Embedded JSON',
+        isNeon: dbStatus.isNeon,
         databaseConnected: dbStatus.connected,
         isMaintenanceMode,
         telegramBotConfigured: !!telegramBotToken,
@@ -988,10 +1008,22 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT} in ${isProd ? 'production' : 'development'} mode (Cached & Scalable)`);
+  const server = app.listen(Number(PORT), '0.0.0.0', () => {
+    console.log(`🚀 Server listening on 0.0.0.0:${PORT} in ${isProd ? 'production' : 'development'} mode (Railway & Neon Optimized)`);
     initTelegramBot();
   });
+
+  // Graceful shutdown for Railway container lifecycle
+  const handleShutdown = (signal: string) => {
+    console.log(`Received ${signal}. Gracefully closing HTTP server...`);
+    server.close(() => {
+      console.log('HTTP server closed. Exiting process.');
+      process.exit(0);
+    });
+  };
+
+  process.on('SIGTERM', () => handleShutdown('SIGTERM'));
+  process.on('SIGINT', () => handleShutdown('SIGINT'));
 }
 
 startServer();
