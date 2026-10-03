@@ -1,6 +1,17 @@
 import fs from 'fs';
 import path from 'path';
 import pg from 'pg';
+import {
+  UserContext,
+  BeautyDna,
+  ClosetItem,
+  BeautyProductItem,
+  SavedLook,
+  UserSubscription,
+  UserPreferences,
+  ExtendedStyleDNA,
+  ColorDNA,
+} from '../types/index.js';
 
 const { Pool } = pg;
 
@@ -31,6 +42,62 @@ export interface DbStatus {
   isNeon?: boolean;
 }
 
+const DEFAULT_BEAUTY_DNA: BeautyDna = {
+  faceShape: 'oval',
+  skinType: 'balanced',
+  hairTexture: 'wavy',
+  hairLength: 'medium',
+  undertone: 'neutral',
+  dailyRoutineTime: 10,
+  primaryGoal: 'آراستگی سریع و راحت متناسب با سبک زندگی من',
+  styleDna: {
+    minimalVsMaximal: 35,
+    colorfulVsNeutral: 30,
+    boldVsSubtle: 45,
+    feminineVsStructured: 55,
+    comfortVsFashion: 70,
+    primaryArchetype: 'Classic Chic',
+    secondaryArchetype: 'Minimalist Relaxed',
+    preferredPalette: 'خنثی و گرم',
+  },
+};
+
+const DEFAULT_STYLE_DNA: ExtendedStyleDNA = {
+  minimalVsMaximal: 35,
+  neutralVsColorful: 30,
+  subtleVsBold: 45,
+  feminineVsStructured: 55,
+  comfortVsFashion: 70,
+  classicVsTrendy: 40,
+  naturalVsGlamorous: 30,
+  primaryArchetype: 'Classic Chic',
+  secondaryArchetype: 'Minimalist Relaxed',
+  contextualProfiles: {
+    everyday: { primaryArchetype: 'Clean Minimal', secondaryArchetype: 'Relaxed', keyRule: 'راحتی با خطوط تمیز' },
+    work: { primaryArchetype: 'Structured Chic', secondaryArchetype: 'Smart Casual', keyRule: 'وقار و آراستگی' },
+    date: { primaryArchetype: 'Soft Glam', secondaryArchetype: 'Feminine', keyRule: 'درخشش طبیعی و لطافت' },
+    party: { primaryArchetype: 'Bold Elegance', secondaryArchetype: 'Statement', keyRule: 'اکسسوری شاخص' },
+    photo: { primaryArchetype: 'High Definition', secondaryArchetype: 'Polished', keyRule: 'تمرکز بر کانتور ملایم' },
+    travel: { primaryArchetype: 'Capsule Comfort', secondaryArchetype: 'Versatile', keyRule: 'چندمنظوره بودن آیتم‌ها' },
+  },
+};
+
+const DEFAULT_COLOR_DNA: ColorDNA = {
+  favoriteColors: ['کرم', 'شیری', 'طوسی زغالی'],
+  dislikedColors: ['نئونی'],
+  preferredNeutrals: ['کرم شنی', 'شکلاتی', 'مشکی کربن'],
+  accentColors: ['زرشکی', 'سبز زیتونی'],
+  flatteringNearFace: ['کرم', 'طوسی روشن'],
+  occasionPalettePreferences: {
+    everyday: ['کرم', 'سفید', 'طوسی'],
+    work: ['سرمه‌ای', 'طوسی', 'کرم'],
+    date: ['رز ملایم', 'شکلاتی'],
+    party: ['مشکی', 'شرابی'],
+    photo: ['رنگ‌های گرم و مات'],
+    travel: ['پالت خنثی هماهنگ'],
+  },
+};
+
 // -------------------------------------------------------------
 // Database Engine
 // -------------------------------------------------------------
@@ -39,14 +106,14 @@ class DatabaseService {
   private isPostgres = false;
   private embeddedFilePath: string;
   private embeddedData: {
-    users: Record<string, { firstName?: string; username?: string; lastActive: string }>;
+    users: Record<string, { firstName?: string; username?: string; lastActive: string; createdAt: string }>;
     dna: Record<string, any>;
     closet: Record<string, any[]>;
     shelf: Record<string, any[]>;
     savedLooks: Record<string, any[]>;
     subscriptions: Record<string, any>;
     events: Array<{ id: number; telegramId: string; eventType: string; feature?: string; context?: any; metadata?: any; createdAt: string }>;
-    preferences: Record<string, any>;
+    preferences: Record<string, { preferences: any; learnedWeights: any; updatedAt: string }>;
     payments: Record<string, any>;
   } = {
     users: {},
@@ -126,15 +193,18 @@ class DatabaseService {
             telegram_id VARCHAR(64) PRIMARY KEY,
             first_name TEXT,
             username TEXT,
-            last_active TIMESTAMP DEFAULT NOW()
+            last_active TIMESTAMP DEFAULT NOW(),
+            created_at TIMESTAMP DEFAULT NOW()
           );
+
+          ALTER TABLE ayna_users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
 
           CREATE TABLE IF NOT EXISTS ayna_user_data (
             telegram_id VARCHAR(64) PRIMARY KEY,
-            dna JSONB,
-            closet JSONB,
-            shelf JSONB,
-            saved_looks JSONB,
+            dna JSONB DEFAULT '{}'::jsonb,
+            closet JSONB DEFAULT '[]'::jsonb,
+            shelf JSONB DEFAULT '[]'::jsonb,
+            saved_looks JSONB DEFAULT '[]'::jsonb,
             subscription JSONB,
             updated_at TIMESTAMP DEFAULT NOW()
           );
@@ -143,17 +213,20 @@ class DatabaseService {
 
           CREATE TABLE IF NOT EXISTS ayna_subscriptions (
             telegram_id VARCHAR(64) PRIMARY KEY,
-            tier VARCHAR(32) NOT NULL,
-            is_active BOOLEAN DEFAULT TRUE,
+            tier VARCHAR(32) NOT NULL DEFAULT 'free',
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
             plan_name TEXT,
             payment_method VARCHAR(32),
             expires_at TIMESTAMP,
+            started_at TIMESTAMP DEFAULT NOW(),
             created_at TIMESTAMP DEFAULT NOW(),
             updated_at TIMESTAMP DEFAULT NOW()
           );
 
+          ALTER TABLE ayna_subscriptions ADD COLUMN IF NOT EXISTS started_at TIMESTAMP DEFAULT NOW();
+
           CREATE TABLE IF NOT EXISTS ayna_user_events (
-            id SERIAL PRIMARY KEY,
+            id BIGSERIAL PRIMARY KEY,
             telegram_id VARCHAR(64) NOT NULL,
             event_type VARCHAR(64) NOT NULL,
             feature VARCHAR(64),
@@ -164,36 +237,70 @@ class DatabaseService {
 
           CREATE TABLE IF NOT EXISTS ayna_user_preferences (
             telegram_id VARCHAR(64) PRIMARY KEY,
-            preferences JSONB NOT NULL DEFAULT '{}',
-            learned_weights JSONB NOT NULL DEFAULT '{}',
+            preferences JSONB NOT NULL DEFAULT '{}'::jsonb,
+            learned_weights JSONB NOT NULL DEFAULT '{}'::jsonb,
             updated_at TIMESTAMP DEFAULT NOW()
           );
 
           CREATE TABLE IF NOT EXISTS ayna_payments (
-            id SERIAL PRIMARY KEY,
+            id BIGSERIAL PRIMARY KEY,
             telegram_id VARCHAR(64) NOT NULL,
             provider VARCHAR(32) NOT NULL,
             plan_id VARCHAR(32) NOT NULL,
             amount_stars INT,
             amount_toman INT,
-            invoice_payload VARCHAR(128) UNIQUE,
+            invoice_payload VARCHAR(128) NOT NULL UNIQUE,
             telegram_payment_charge_id VARCHAR(128),
             status VARCHAR(32) NOT NULL DEFAULT 'pending',
+            is_anonymized BOOLEAN DEFAULT FALSE,
             created_at TIMESTAMP DEFAULT NOW(),
             updated_at TIMESTAMP DEFAULT NOW()
           );
 
+          ALTER TABLE ayna_payments ADD COLUMN IF NOT EXISTS is_anonymized BOOLEAN DEFAULT FALSE;
+
+          -- Safe Foreign Key integrity checks
+          DO $$
+          BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_ayna_user_data_users') THEN
+              ALTER TABLE ayna_user_data
+              ADD CONSTRAINT fk_ayna_user_data_users
+              FOREIGN KEY (telegram_id) REFERENCES ayna_users(telegram_id) ON DELETE CASCADE;
+            END IF;
+
+            IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_ayna_subscriptions_users') THEN
+              ALTER TABLE ayna_subscriptions
+              ADD CONSTRAINT fk_ayna_subscriptions_users
+              FOREIGN KEY (telegram_id) REFERENCES ayna_users(telegram_id) ON DELETE CASCADE;
+            END IF;
+
+            IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_ayna_user_preferences_users') THEN
+              ALTER TABLE ayna_user_preferences
+              ADD CONSTRAINT fk_ayna_user_preferences_users
+              FOREIGN KEY (telegram_id) REFERENCES ayna_users(telegram_id) ON DELETE CASCADE;
+            END IF;
+
+            IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_ayna_user_events_users') THEN
+              ALTER TABLE ayna_user_events
+              ADD CONSTRAINT fk_ayna_user_events_users
+              FOREIGN KEY (telegram_id) REFERENCES ayna_users(telegram_id) ON DELETE CASCADE;
+            END IF;
+          END $$;
+
           CREATE INDEX IF NOT EXISTS idx_ayna_users_last_active ON ayna_users(last_active);
           CREATE INDEX IF NOT EXISTS idx_ayna_user_data_updated ON ayna_user_data(updated_at);
           CREATE INDEX IF NOT EXISTS idx_ayna_subscriptions_active ON ayna_subscriptions(is_active);
+          CREATE INDEX IF NOT EXISTS idx_ayna_subscriptions_active_expires ON ayna_subscriptions(is_active, expires_at);
           CREATE INDEX IF NOT EXISTS idx_ayna_events_user_type ON ayna_user_events(telegram_id, event_type);
+          CREATE INDEX IF NOT EXISTS idx_ayna_events_user_created ON ayna_user_events(telegram_id, created_at DESC);
           CREATE INDEX IF NOT EXISTS idx_ayna_events_created ON ayna_user_events(created_at);
           CREATE INDEX IF NOT EXISTS idx_ayna_payments_user ON ayna_payments(telegram_id);
+          CREATE INDEX IF NOT EXISTS idx_ayna_payments_user_status ON ayna_payments(telegram_id, status);
           CREATE INDEX IF NOT EXISTS idx_ayna_payments_payload ON ayna_payments(invoice_payload);
         `);
 
         this.isPostgres = true;
-        console.log(`✅ Connected to ${isNeon ? 'Neon Serverless PostgreSQL' : 'PostgreSQL'} database successfully with connection pooling and indexes!`);
+        console.log(`✅ Connected to ${isNeon ? 'Neon Serverless PostgreSQL' : 'PostgreSQL'} database successfully with connection pooling, foreign keys and indexes!`);
         return;
       } catch (err) {
         if (isProd) {
@@ -215,18 +322,15 @@ class DatabaseService {
       if (fs.existsSync(this.embeddedFilePath)) {
         const raw = fs.readFileSync(this.embeddedFilePath, 'utf-8');
         this.embeddedData = JSON.parse(raw);
-        if (!this.embeddedData.subscriptions) {
-          this.embeddedData.subscriptions = {};
-        }
-        if (!this.embeddedData.events) {
-          this.embeddedData.events = [];
-        }
-        if (!this.embeddedData.preferences) {
-          this.embeddedData.preferences = {};
-        }
-        if (!this.embeddedData.payments) {
-          this.embeddedData.payments = {};
-        }
+        if (!this.embeddedData.users) this.embeddedData.users = {};
+        if (!this.embeddedData.dna) this.embeddedData.dna = {};
+        if (!this.embeddedData.closet) this.embeddedData.closet = {};
+        if (!this.embeddedData.shelf) this.embeddedData.shelf = {};
+        if (!this.embeddedData.savedLooks) this.embeddedData.savedLooks = {};
+        if (!this.embeddedData.subscriptions) this.embeddedData.subscriptions = {};
+        if (!this.embeddedData.events) this.embeddedData.events = [];
+        if (!this.embeddedData.preferences) this.embeddedData.preferences = {};
+        if (!this.embeddedData.payments) this.embeddedData.payments = {};
       } else {
         this.saveEmbeddedData();
       }
@@ -263,15 +367,21 @@ class DatabaseService {
     }, 120);
   }
 
+  /**
+   * Synchronizes user profile and assets transactionally.
+   */
   async syncUserData(payload: UserSyncPayload): Promise<boolean> {
     const { telegramId, firstName, username, dna, closet, shelf, savedLooks } = payload;
     if (!isSafeId(telegramId)) return false;
 
     if (this.isPostgres && this.pgPool) {
+      const client = await this.pgPool.connect();
       try {
-        await this.pgPool.query(
-          `INSERT INTO ayna_users (telegram_id, first_name, username, last_active)
-           VALUES ($1, $2, $3, NOW())
+        await client.query('BEGIN');
+
+        await client.query(
+          `INSERT INTO ayna_users (telegram_id, first_name, username, last_active, created_at)
+           VALUES ($1, $2, $3, NOW(), NOW())
            ON CONFLICT (telegram_id) DO UPDATE SET
              first_name = COALESCE($2, ayna_users.first_name),
              username = COALESCE($3, ayna_users.username),
@@ -279,15 +389,14 @@ class DatabaseService {
           [telegramId, firstName || null, username || null]
         );
 
-        await this.pgPool.query(
-          `INSERT INTO ayna_user_data (telegram_id, dna, closet, shelf, saved_looks, subscription, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, NOW())
+        await client.query(
+          `INSERT INTO ayna_user_data (telegram_id, dna, closet, shelf, saved_looks, updated_at)
+           VALUES ($1, $2, $3, $4, $5, NOW())
            ON CONFLICT (telegram_id) DO UPDATE SET
              dna = COALESCE($2, ayna_user_data.dna),
              closet = COALESCE($3, ayna_user_data.closet),
              shelf = COALESCE($4, ayna_user_data.shelf),
              saved_looks = COALESCE($5, ayna_user_data.saved_looks),
-             subscription = COALESCE($6, ayna_user_data.subscription),
              updated_at = NOW()`,
           [
             telegramId,
@@ -295,34 +404,47 @@ class DatabaseService {
             closet ? JSON.stringify(closet) : null,
             shelf ? JSON.stringify(shelf) : null,
             savedLooks ? JSON.stringify(savedLooks) : null,
-            payload.subscription ? JSON.stringify(payload.subscription) : null,
           ]
         );
+
+        await client.query('COMMIT');
         return true;
       } catch (err) {
-        console.error('PostgreSQL sync error:', err);
+        await client.query('ROLLBACK');
+        console.error('PostgreSQL syncUserData transaction error:', err);
         return false;
+      } finally {
+        client.release();
       }
     }
 
     // Embedded fallback
     const now = new Date().toISOString();
-    this.embeddedData.users[telegramId] = {
-      firstName: firstName || this.embeddedData.users[telegramId]?.firstName,
-      username: username || this.embeddedData.users[telegramId]?.username,
-      lastActive: now,
-    };
+    if (!this.embeddedData.users[telegramId]) {
+      this.embeddedData.users[telegramId] = {
+        firstName,
+        username,
+        lastActive: now,
+        createdAt: now,
+      };
+    } else {
+      this.embeddedData.users[telegramId].firstName = firstName || this.embeddedData.users[telegramId].firstName;
+      this.embeddedData.users[telegramId].username = username || this.embeddedData.users[telegramId].username;
+      this.embeddedData.users[telegramId].lastActive = now;
+    }
 
     if (dna) this.embeddedData.dna[telegramId] = dna;
     if (closet) this.embeddedData.closet[telegramId] = closet;
     if (shelf) this.embeddedData.shelf[telegramId] = shelf;
     if (savedLooks) this.embeddedData.savedLooks[telegramId] = savedLooks;
-    if (payload.subscription) this.embeddedData.subscriptions[telegramId] = payload.subscription;
 
     this.saveEmbeddedData();
     return true;
   }
 
+  /**
+   * Fetches user profile, assets, and authoritative subscription.
+   */
   async getUserData(telegramId: string): Promise<{
     dna?: any;
     closet?: any[];
@@ -340,6 +462,7 @@ class DatabaseService {
 
         const profile = userRes.rows[0] || null;
         const data = dataRes.rows[0] || {};
+        const subscription = await this.getSubscription(telegramId);
 
         return {
           profile,
@@ -347,7 +470,7 @@ class DatabaseService {
           closet: data.closet || undefined,
           shelf: data.shelf || undefined,
           savedLooks: data.saved_looks || undefined,
-          subscription: data.subscription || undefined,
+          subscription: subscription || undefined,
         };
       } catch (err) {
         console.error('PostgreSQL fetch error:', err);
@@ -358,6 +481,7 @@ class DatabaseService {
     // Embedded Mode
     const profile = this.embeddedData.users[telegramId];
     if (!profile) return null;
+    const subscription = await this.getSubscription(telegramId);
 
     return {
       profile,
@@ -365,7 +489,7 @@ class DatabaseService {
       closet: this.embeddedData.closet[telegramId],
       shelf: this.embeddedData.shelf[telegramId],
       savedLooks: this.embeddedData.savedLooks[telegramId],
-      subscription: this.embeddedData.subscriptions[telegramId] || null,
+      subscription: subscription || null,
     };
   }
 
@@ -408,18 +532,127 @@ class DatabaseService {
     };
   }
 
+  /**
+   * Resets personalization (DNA, Closet, Shelf, Saved Looks, Learned Preferences)
+   * while safely preserving the user account and active paid subscription.
+   */
+  async resetPersonalization(telegramId: string): Promise<boolean> {
+    if (!isSafeId(telegramId)) return false;
+
+    if (this.isPostgres && this.pgPool) {
+      const client = await this.pgPool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(
+          `UPDATE ayna_user_data
+           SET dna = $1, closet = '[]'::jsonb, shelf = '[]'::jsonb, saved_looks = '[]'::jsonb, updated_at = NOW()
+           WHERE telegram_id = $2`,
+          [JSON.stringify(DEFAULT_BEAUTY_DNA), telegramId]
+        );
+        await client.query(
+          `INSERT INTO ayna_user_preferences (telegram_id, preferences, learned_weights, updated_at)
+           VALUES ($1, '{}'::jsonb, '{}'::jsonb, NOW())
+           ON CONFLICT (telegram_id) DO UPDATE SET
+             preferences = '{}'::jsonb,
+             learned_weights = '{}'::jsonb,
+             updated_at = NOW()`,
+          [telegramId]
+        );
+        await client.query('COMMIT');
+        return true;
+      } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('PostgreSQL resetPersonalization error:', err);
+        return false;
+      } finally {
+        client.release();
+      }
+    }
+
+    this.embeddedData.dna[telegramId] = DEFAULT_BEAUTY_DNA;
+    this.embeddedData.closet[telegramId] = [];
+    this.embeddedData.shelf[telegramId] = [];
+    this.embeddedData.savedLooks[telegramId] = [];
+    this.embeddedData.preferences[telegramId] = {
+      preferences: {},
+      learnedWeights: {},
+      updatedAt: new Date().toISOString(),
+    };
+    this.saveEmbeddedData();
+    return true;
+  }
+
+  /**
+   * Deletes user-owned product data (closet, shelf, saved looks, preferences, events)
+   * while keeping the user account shell and active paid subscription intact.
+   */
   async deleteUserData(telegramId: string): Promise<boolean> {
     if (!isSafeId(telegramId)) return false;
 
     if (this.isPostgres && this.pgPool) {
+      const client = await this.pgPool.connect();
       try {
-        await this.pgPool.query(`DELETE FROM ayna_subscriptions WHERE telegram_id = $1`, [telegramId]);
-        await this.pgPool.query(`DELETE FROM ayna_user_data WHERE telegram_id = $1`, [telegramId]);
-        await this.pgPool.query(`DELETE FROM ayna_users WHERE telegram_id = $1`, [telegramId]);
+        await client.query('BEGIN');
+        await client.query(`DELETE FROM ayna_user_events WHERE telegram_id = $1`, [telegramId]);
+        await client.query(`DELETE FROM ayna_user_preferences WHERE telegram_id = $1`, [telegramId]);
+        await client.query(`DELETE FROM ayna_user_data WHERE telegram_id = $1`, [telegramId]);
+        await client.query('COMMIT');
         return true;
       } catch (err) {
-        console.error('PostgreSQL delete error:', err);
+        await client.query('ROLLBACK');
+        console.error('PostgreSQL deleteUserData error:', err);
         return false;
+      } finally {
+        client.release();
+      }
+    }
+
+    delete this.embeddedData.dna[telegramId];
+    delete this.embeddedData.closet[telegramId];
+    delete this.embeddedData.shelf[telegramId];
+    delete this.embeddedData.savedLooks[telegramId];
+    delete this.embeddedData.preferences[telegramId];
+    this.embeddedData.events = this.embeddedData.events.filter((e) => e.telegramId !== telegramId);
+    this.saveEmbeddedData();
+    return true;
+  }
+
+  /**
+   * Completely deletes the user account, subscription, and user data.
+   * By default, financial payment records are anonymized to preserve audit integrity.
+   */
+  async deleteAccount(telegramId: string, options: { retainAuditPayments?: boolean } = { retainAuditPayments: true }): Promise<boolean> {
+    if (!isSafeId(telegramId)) return false;
+
+    if (this.isPostgres && this.pgPool) {
+      const client = await this.pgPool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(`DELETE FROM ayna_user_events WHERE telegram_id = $1`, [telegramId]);
+        await client.query(`DELETE FROM ayna_user_preferences WHERE telegram_id = $1`, [telegramId]);
+        await client.query(`DELETE FROM ayna_user_data WHERE telegram_id = $1`, [telegramId]);
+        await client.query(`DELETE FROM ayna_subscriptions WHERE telegram_id = $1`, [telegramId]);
+        await client.query(`DELETE FROM ayna_users WHERE telegram_id = $1`, [telegramId]);
+
+        if (options.retainAuditPayments) {
+          await client.query(
+            `UPDATE ayna_payments
+             SET telegram_id = 'anonymized_' || id, is_anonymized = TRUE, updated_at = NOW()
+             WHERE telegram_id = $1`,
+            [telegramId]
+          );
+        } else {
+          await client.query(`DELETE FROM ayna_payments WHERE telegram_id = $1`, [telegramId]);
+        }
+
+        await client.query('COMMIT');
+        return true;
+      } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('PostgreSQL deleteAccount error:', err);
+        return false;
+      } finally {
+        client.release();
       }
     }
 
@@ -429,6 +662,25 @@ class DatabaseService {
     delete this.embeddedData.shelf[telegramId];
     delete this.embeddedData.savedLooks[telegramId];
     delete this.embeddedData.subscriptions[telegramId];
+    delete this.embeddedData.preferences[telegramId];
+    this.embeddedData.events = this.embeddedData.events.filter((e) => e.telegramId !== telegramId);
+
+    if (options.retainAuditPayments) {
+      for (const [key, payment] of Object.entries(this.embeddedData.payments)) {
+        if (payment.telegramId === telegramId) {
+          payment.telegramId = `anonymized_${payment.id || key}`;
+          payment.isAnonymized = true;
+          payment.updatedAt = new Date().toISOString();
+        }
+      }
+    } else {
+      for (const [key, payment] of Object.entries(this.embeddedData.payments)) {
+        if (payment.telegramId === telegramId) {
+          delete this.embeddedData.payments[key];
+        }
+      }
+    }
+
     this.saveEmbeddedData();
     return true;
   }
@@ -485,11 +737,13 @@ class DatabaseService {
       try {
         const usersRes = await this.pgPool.query(`SELECT * FROM ayna_users LIMIT 500`);
         const dataRes = await this.pgPool.query(`SELECT * FROM ayna_user_data LIMIT 500`);
+        const subRes = await this.pgPool.query(`SELECT * FROM ayna_subscriptions LIMIT 500`);
         return {
           timestamp: new Date().toISOString(),
           engine: 'postgresql',
           users: usersRes.rows,
           userData: dataRes.rows,
+          subscriptions: subRes.rows,
         };
       } catch (e) {
         return { error: 'Failed to snapshot postgres' };
@@ -502,14 +756,18 @@ class DatabaseService {
     };
   }
 
+  /**
+   * Sets user subscription in the authoritative ayna_subscriptions table.
+   */
   async setSubscription(telegramId: string, subscription: any): Promise<boolean> {
     if (!isSafeId(telegramId)) return false;
 
     if (this.isPostgres && this.pgPool) {
       try {
+        const expiresAt = subscription.expiresAt ? new Date(subscription.expiresAt) : null;
         await this.pgPool.query(
-          `INSERT INTO ayna_subscriptions (telegram_id, tier, is_active, plan_name, payment_method, expires_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, NOW())
+          `INSERT INTO ayna_subscriptions (telegram_id, tier, is_active, plan_name, payment_method, expires_at, started_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
            ON CONFLICT (telegram_id) DO UPDATE SET
              tier = $2,
              is_active = $3,
@@ -523,17 +781,8 @@ class DatabaseService {
             subscription.isActive !== false,
             subscription.planName || null,
             subscription.paymentMethod || null,
-            subscription.expiresAt ? new Date(subscription.expiresAt) : null,
+            expiresAt,
           ]
-        );
-
-        await this.pgPool.query(
-          `INSERT INTO ayna_user_data (telegram_id, subscription, updated_at)
-           VALUES ($1, $2, NOW())
-           ON CONFLICT (telegram_id) DO UPDATE SET
-             subscription = $2,
-             updated_at = NOW()`,
-          [telegramId, JSON.stringify(subscription)]
         );
         return true;
       } catch (err) {
@@ -542,35 +791,53 @@ class DatabaseService {
       }
     }
 
-    this.embeddedData.subscriptions[telegramId] = subscription;
+    this.embeddedData.subscriptions[telegramId] = {
+      ...subscription,
+      startedAt: subscription.startedAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
     this.saveEmbeddedData();
     return true;
   }
 
+  /**
+   * Canonical, server-authoritative subscription retrieval.
+   * Enforces automatic expiration calculation against current server timestamp.
+   */
   async getSubscription(telegramId: string): Promise<any | null> {
     if (!isSafeId(telegramId)) return null;
 
     if (this.isPostgres && this.pgPool) {
       try {
-        const res = await this.pgPool.query(
-          `SELECT subscription FROM ayna_user_data WHERE telegram_id = $1`,
-          [telegramId]
-        );
-        if (res.rows[0]?.subscription) {
-          return res.rows[0].subscription;
-        }
+        // Query authoritative relational table first
         const subRes = await this.pgPool.query(
           `SELECT * FROM ayna_subscriptions WHERE telegram_id = $1`,
           [telegramId]
         );
         if (subRes.rows[0]) {
           const row = subRes.rows[0];
+          const isExpired = row.expires_at ? new Date(row.expires_at).getTime() < Date.now() : false;
           return {
             tier: row.tier,
-            isActive: row.is_active,
+            isActive: Boolean(row.is_active) && !isExpired,
             expiresAt: row.expires_at ? new Date(row.expires_at).toISOString() : undefined,
             planName: row.plan_name,
             paymentMethod: row.payment_method,
+            startedAt: row.started_at ? new Date(row.started_at).toISOString() : undefined,
+          };
+        }
+
+        // Backward compatibility fallback to ayna_user_data.subscription if no relational row
+        const res = await this.pgPool.query(
+          `SELECT subscription FROM ayna_user_data WHERE telegram_id = $1`,
+          [telegramId]
+        );
+        if (res.rows[0]?.subscription) {
+          const legacySub = res.rows[0].subscription;
+          const isExpired = legacySub.expiresAt ? new Date(legacySub.expiresAt).getTime() < Date.now() : false;
+          return {
+            ...legacySub,
+            isActive: Boolean(legacySub.isActive) && !isExpired,
           };
         }
         return null;
@@ -580,7 +847,13 @@ class DatabaseService {
       }
     }
 
-    return this.embeddedData.subscriptions[telegramId] || null;
+    const sub = this.embeddedData.subscriptions[telegramId];
+    if (!sub) return null;
+    const isExpired = sub.expiresAt ? new Date(sub.expiresAt).getTime() < Date.now() : false;
+    return {
+      ...sub,
+      isActive: Boolean(sub.isActive) && !isExpired,
+    };
   }
 
   async getAllSubscriptions(): Promise<Array<{ telegramId: string; subscription: any; user?: any }>> {
@@ -592,31 +865,41 @@ class DatabaseService {
            LEFT JOIN ayna_users u ON s.telegram_id = u.telegram_id
            ORDER BY s.updated_at DESC`
         );
-        return res.rows.map((row: any) => ({
-          telegramId: row.telegram_id,
-          subscription: {
-            tier: row.tier,
-            isActive: row.is_active,
-            expiresAt: row.expires_at ? new Date(row.expires_at).toISOString() : undefined,
-            planName: row.plan_name,
-            paymentMethod: row.payment_method,
-          },
-          user: {
-            firstName: row.first_name,
-            username: row.username,
-          },
-        }));
+        return res.rows.map((row: any) => {
+          const isExpired = row.expires_at ? new Date(row.expires_at).getTime() < Date.now() : false;
+          return {
+            telegramId: row.telegram_id,
+            subscription: {
+              tier: row.tier,
+              isActive: Boolean(row.is_active) && !isExpired,
+              expiresAt: row.expires_at ? new Date(row.expires_at).toISOString() : undefined,
+              planName: row.plan_name,
+              paymentMethod: row.payment_method,
+              startedAt: row.started_at ? new Date(row.started_at).toISOString() : undefined,
+            },
+            user: {
+              firstName: row.first_name,
+              username: row.username,
+            },
+          };
+        });
       } catch (err) {
         console.error('PostgreSQL getAllSubscriptions error:', err);
         return [];
       }
     }
 
-    return Object.entries(this.embeddedData.subscriptions).map(([id, sub]) => ({
-      telegramId: id,
-      subscription: sub,
-      user: this.embeddedData.users[id] || null,
-    }));
+    return Object.entries(this.embeddedData.subscriptions).map(([id, sub]) => {
+      const isExpired = sub.expiresAt ? new Date(sub.expiresAt).getTime() < Date.now() : false;
+      return {
+        telegramId: id,
+        subscription: {
+          ...sub,
+          isActive: Boolean(sub.isActive) && !isExpired,
+        },
+        user: this.embeddedData.users[id] || null,
+      };
+    });
   }
 
   // -------------------------------------------------------------
@@ -701,6 +984,33 @@ class DatabaseService {
       .reverse();
   }
 
+  /**
+   * Prunes interaction events older than retentionDays (Data Minimization / Privacy Policy).
+   */
+  async pruneOldEvents(retentionDays = 90): Promise<number> {
+    if (this.isPostgres && this.pgPool) {
+      try {
+        const res = await this.pgPool.query(
+          `DELETE FROM ayna_user_events WHERE created_at < NOW() - INTERVAL '1 day' * $1`,
+          [retentionDays]
+        );
+        return res.rowCount ?? 0;
+      } catch (err) {
+        console.error('PostgreSQL pruneOldEvents error:', err);
+        return 0;
+      }
+    }
+
+    const cutoffTime = Date.now() - retentionDays * 86400000;
+    const initialCount = this.embeddedData.events.length;
+    this.embeddedData.events = this.embeddedData.events.filter(
+      (e) => new Date(e.createdAt).getTime() >= cutoffTime
+    );
+    const prunedCount = initialCount - this.embeddedData.events.length;
+    if (prunedCount > 0) this.saveEmbeddedData();
+    return prunedCount;
+  }
+
   async getLearnedPreferences(telegramId: string): Promise<any | null> {
     if (!isSafeId(telegramId)) return null;
 
@@ -751,8 +1061,8 @@ class DatabaseService {
     }
 
     this.embeddedData.preferences[telegramId] = {
-      preferences,
-      learnedWeights,
+      preferences: preferences || {},
+      learnedWeights: learnedWeights || {},
       updatedAt: new Date().toISOString(),
     };
     this.saveEmbeddedData();
@@ -788,13 +1098,15 @@ class DatabaseService {
       }
     }
 
-    this.embeddedData.payments[invoicePayload] = {
-      ...record,
-      status: 'pending',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    this.saveEmbeddedData();
+    if (!this.embeddedData.payments[invoicePayload]) {
+      this.embeddedData.payments[invoicePayload] = {
+        ...record,
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      this.saveEmbeddedData();
+    }
     return true;
   }
 
@@ -829,7 +1141,6 @@ class DatabaseService {
   /**
    * Atomically transitions a pending payment to completed.
    * Enforces idempotency: Returns true only if status changed from 'pending' to 'completed'.
-   * If already 'completed' or not found, returns false.
    */
   async transitionPaymentToCompleted(invoicePayload: string, chargeId?: string): Promise<boolean> {
     if (!invoicePayload) return false;
@@ -864,6 +1175,140 @@ class DatabaseService {
     return false;
   }
 
+  /**
+   * Atomically settles a payment, grants subscription, and records event in a single transaction.
+   * Guaranteed against race conditions and partial failures.
+   */
+  async settlePaymentAndGrantSubscription(params: {
+    invoicePayload: string;
+    chargeId?: string;
+    subscription: {
+      tier: string;
+      planName?: string;
+      durationMonths: number;
+      paymentMethod?: string;
+    };
+    eventMetadata?: any;
+  }): Promise<{ success: boolean; duplicate?: boolean; notFound?: boolean; subscription?: any }> {
+    const { invoicePayload, chargeId, subscription, eventMetadata } = params;
+
+    if (this.isPostgres && this.pgPool) {
+      const client = await this.pgPool.connect();
+      try {
+        await client.query('BEGIN');
+
+        // 1. Check and atomically transition payment record
+        const paymentRes = await client.query(
+          `UPDATE ayna_payments
+           SET status = 'completed',
+               telegram_payment_charge_id = COALESCE($1, telegram_payment_charge_id),
+               updated_at = NOW()
+           WHERE invoice_payload = $2 AND status = 'pending'
+           RETURNING telegram_id, plan_id, amount_stars`,
+          [chargeId || null, invoicePayload]
+        );
+
+        if ((paymentRes.rowCount ?? 0) === 0) {
+          // Check if already completed
+          const existingRes = await client.query(
+            `SELECT status FROM ayna_payments WHERE invoice_payload = $1`,
+            [invoicePayload]
+          );
+          await client.query('ROLLBACK');
+          if (existingRes.rows[0]?.status === 'completed') {
+            return { success: false, duplicate: true };
+          }
+          return { success: false, notFound: true };
+        }
+
+        const telegramId = paymentRes.rows[0].telegram_id;
+        const expiryDate = new Date();
+        expiryDate.setMonth(expiryDate.getMonth() + subscription.durationMonths);
+
+        // 2. Grant authoritative subscription
+        await client.query(
+          `INSERT INTO ayna_subscriptions (telegram_id, tier, is_active, plan_name, payment_method, expires_at, started_at, updated_at)
+           VALUES ($1, $2, TRUE, $3, $4, $5, NOW(), NOW())
+           ON CONFLICT (telegram_id) DO UPDATE SET
+             tier = $2,
+             is_active = TRUE,
+             plan_name = $3,
+             payment_method = $4,
+             expires_at = $5,
+             updated_at = NOW()`,
+          [
+            telegramId,
+            subscription.tier,
+            subscription.planName || null,
+            subscription.paymentMethod || 'stars',
+            expiryDate,
+          ]
+        );
+
+        // 3. Record audit event
+        await client.query(
+          `INSERT INTO ayna_user_events (telegram_id, event_type, feature, metadata, created_at)
+           VALUES ($1, 'look_tried', 'subscription_stars', $2, NOW())`,
+          [telegramId, JSON.stringify(eventMetadata || { planId: subscription.tier })]
+        );
+
+        await client.query('COMMIT');
+
+        const activeSub = {
+          tier: subscription.tier,
+          isActive: true,
+          expiresAt: expiryDate.toISOString(),
+          startedAt: new Date().toISOString(),
+          planName: subscription.planName,
+          paymentMethod: subscription.paymentMethod || 'stars',
+        };
+
+        return { success: true, subscription: activeSub };
+      } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('PostgreSQL settlePaymentAndGrantSubscription transaction error:', err);
+        return { success: false };
+      } finally {
+        client.release();
+      }
+    }
+
+    // Embedded Mode
+    const rec = this.embeddedData.payments[invoicePayload];
+    if (!rec) return { success: false, notFound: true };
+    if (rec.status === 'completed') return { success: false, duplicate: true };
+
+    rec.status = 'completed';
+    if (chargeId) rec.telegramPaymentChargeId = chargeId;
+    rec.updatedAt = new Date().toISOString();
+
+    const expiryDate = new Date();
+    expiryDate.setMonth(expiryDate.getMonth() + subscription.durationMonths);
+
+    const activeSub = {
+      tier: subscription.tier,
+      isActive: true,
+      expiresAt: expiryDate.toISOString(),
+      startedAt: new Date().toISOString(),
+      planName: subscription.planName,
+      paymentMethod: subscription.paymentMethod || 'stars',
+    };
+
+    this.embeddedData.subscriptions[rec.telegramId] = activeSub;
+
+    this.embeddedData.events.push({
+      id: this.embeddedData.events.length + 1,
+      telegramId: rec.telegramId,
+      eventType: 'look_tried',
+      feature: 'subscription_stars',
+      metadata: eventMetadata || { planId: subscription.tier },
+      createdAt: new Date().toISOString(),
+    });
+
+    this.saveEmbeddedData();
+    return { success: true, subscription: activeSub };
+  }
+
   async getPaymentRecord(invoicePayload: string): Promise<any | null> {
     if (!invoicePayload) return null;
 
@@ -881,6 +1326,66 @@ class DatabaseService {
     }
 
     return this.embeddedData.payments[invoicePayload] || null;
+  }
+
+  /**
+   * Assembles a complete, consistent UserContext for the Beauty Intelligence Engine.
+   * Ready for Phase 3 without implementing prompt mechanics early.
+   */
+  async getUserContext(telegramId: string): Promise<UserContext> {
+    const rawData = await this.getUserData(telegramId);
+    const userPrefs = await this.getLearnedPreferences(telegramId);
+    const recentEvents = await this.getUserEvents(telegramId, 100);
+
+    const beautyDNA: BeautyDna = rawData?.dna || DEFAULT_BEAUTY_DNA;
+    const styleDNA: ExtendedStyleDNA = {
+      ...DEFAULT_STYLE_DNA,
+      ...(beautyDNA.styleDna ? {
+        minimalVsMaximal: beautyDNA.styleDna.minimalVsMaximal ?? 35,
+        neutralVsColorful: beautyDNA.styleDna.colorfulVsNeutral ?? 30,
+        subtleVsBold: beautyDNA.styleDna.boldVsSubtle ?? 45,
+        feminineVsStructured: beautyDNA.styleDna.feminineVsStructured ?? 55,
+        comfortVsFashion: beautyDNA.styleDna.comfortVsFashion ?? 70,
+        primaryArchetype: beautyDNA.styleDna.primaryArchetype || DEFAULT_STYLE_DNA.primaryArchetype,
+        secondaryArchetype: beautyDNA.styleDna.secondaryArchetype || DEFAULT_STYLE_DNA.secondaryArchetype,
+      } : {}),
+    };
+
+    const colorDNA: ColorDNA = DEFAULT_COLOR_DNA;
+
+    const totalLooksTried = recentEvents.filter((e) => e.eventType === 'look_tried').length;
+    const totalLooksSaved = Array.isArray(rawData?.savedLooks) ? rawData.savedLooks.length : 0;
+    const lastEvent = recentEvents[0];
+
+    const preferences: UserPreferences = {
+      preferredRoutineTimeMinutes: beautyDNA.dailyRoutineTime || 10,
+      avoidHeavyTextures: userPrefs?.preferences?.avoidHeavyTextures ?? true,
+      prefersQuickFixes: userPrefs?.preferences?.prefersQuickFixes ?? true,
+      bodyComfortFirst: userPrefs?.preferences?.bodyComfortFirst ?? true,
+    };
+
+    return {
+      identity: {
+        telegramId,
+        firstName: rawData?.profile?.first_name || rawData?.profile?.firstName,
+        username: rawData?.profile?.username,
+      },
+      beautyDNA,
+      styleDNA,
+      colorDNA,
+      closet: (rawData?.closet as ClosetItem[]) || [],
+      shelf: (rawData?.shelf as BeautyProductItem[]) || [],
+      savedLooks: (rawData?.savedLooks as SavedLook[]) || [],
+      subscription: rawData?.subscription as UserSubscription | undefined,
+      preferences,
+      currentContext: {},
+      concerns: [],
+      history: {
+        totalLooksTried,
+        totalLooksSaved,
+        lastActiveSession: lastEvent?.createdAt || rawData?.profile?.last_active,
+      },
+    };
   }
 }
 

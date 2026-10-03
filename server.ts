@@ -749,14 +749,36 @@ app.post('/api/user/sync', requireTelegramUser, async (req: AuthenticatedRequest
   }
 });
 
+// 1. Reset Personalization (Keeps account and active paid subscription intact)
+app.post('/api/user/reset-personalization', requireTelegramUser, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const authenticatedId = String(req.telegramUser!.id);
+    const success = await db.resetPersonalization(authenticatedId);
+    return res.json({ ok: success, message: 'اطلاعات شخصی‌سازی و کمد بازنشانی شدند' });
+  } catch (err) {
+    return res.status(500).json({ error: 'Reset personalization failed' });
+  }
+});
+
+// 2. Wipe User Product Data (Deletes closet, shelf, looks, preferences, events; preserves subscription)
 app.post('/api/user/wipe', requireTelegramUser, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    // Only the verified authenticated user can wipe their own data
     const authenticatedId = String(req.telegramUser!.id);
     const success = await db.deleteUserData(authenticatedId);
-    return res.json({ ok: success });
+    return res.json({ ok: success, message: 'داده‌های محصولات و استایل با موفقیت حذف شدند' });
   } catch (err) {
     return res.status(500).json({ error: 'Wipe failed' });
+  }
+});
+
+// 3. Full Account Deletion (Deletes account and private assets; anonymizes payment ledger for audit)
+app.post('/api/user/delete-account', requireTelegramUser, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const authenticatedId = String(req.telegramUser!.id);
+    const success = await db.deleteAccount(authenticatedId, { retainAuditPayments: true });
+    return res.json({ ok: success, message: 'حساب کاربری و اطلاعات مرتبط به طور کامل پاک شدند' });
+  } catch (err) {
+    return res.status(500).json({ error: 'Account deletion failed' });
   }
 });
 
@@ -1048,6 +1070,17 @@ app.get('/api/admin/export', requireAdmin, adminLimiter, async (req: Authenticat
   }
 });
 
+// 7b. Admin Prune Old Events (Privacy & Retention policy enforcement)
+app.post('/api/admin/prune-events', requireAdmin, adminLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const days = parseInt(req.body.retentionDays, 10) || 90;
+    const prunedCount = await db.pruneOldEvents(days);
+    return res.json({ ok: true, prunedCount, message: `${prunedCount} رویداد قدیمی‌تر از ${days} روز پاکسازی شدند` });
+  } catch (err) {
+    return res.status(500).json({ error: 'Pruning failed' });
+  }
+});
+
 // 8. Admin Test Telegram Bot Ping
 app.post('/api/admin/test-bot-ping', requireAdmin, adminLimiter, async (req: AuthenticatedRequest, res: Response) => {
   if (!telegramBotToken) {
@@ -1201,48 +1234,43 @@ app.post('/api/telegram/webhook', async (req: Request, res: Response) => {
           return res.status(400).json({ ok: false, error: 'Payment integrity check failed' });
         }
 
-        // Atomic transition from 'pending' to 'completed'
-        const transitioned = await db.transitionPaymentToCompleted(payload, payment.telegram_payment_charge_id);
-        if (!transitioned) {
-          console.log(`Payment ${payload} transition failed (already handled by concurrent request).`);
-          return res.json({ ok: true, duplicate: true });
+        // Atomic transactional settlement: transitions payment, activates subscription, and records event
+        const plan = SERVER_SUBSCRIPTION_PLANS[record.planId];
+        if (!plan) {
+          return res.status(400).json({ ok: false, error: 'Invalid plan on payment record' });
         }
 
-        // Activate server-authoritative subscription
-        const plan = SERVER_SUBSCRIPTION_PLANS[record.planId];
-        if (plan) {
-          const expiry = new Date();
-          expiry.setMonth(expiry.getMonth() + plan.durationMonths);
-
-          const sub = {
+        const settlement = await db.settlePaymentAndGrantSubscription({
+          invoicePayload: payload,
+          chargeId: payment.telegram_payment_charge_id,
+          subscription: {
             tier: plan.id,
-            isActive: true,
-            expiresAt: expiry.toISOString(),
-            startedAt: new Date().toISOString(),
             planName: plan.name,
+            durationMonths: plan.durationMonths,
             paymentMethod: 'stars',
-          };
+          },
+          eventMetadata: { planId: plan.id, starsAmount: payment.total_amount },
+        });
 
-          await db.setSubscription(record.telegramId, sub);
-          await db.recordEvent({
-            telegramId: record.telegramId,
-            eventType: 'look_tried',
-            feature: 'subscription_stars',
-            metadata: { planId: plan.id, starsAmount: payment.total_amount },
-          });
-
-          // Send confirmation via Telegram Bot
-          if (telegramBotToken && update.message.chat?.id) {
-            await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                chat_id: update.message.chat.id,
-                text: `✨ پرداخت استارز شما با موفقیت تأیید شد!\nاشتراک **${plan.name}** برای شما فعال گردید. به آینـا بازگردید و از تمام امکانات VIP لذت ببرید. 🌸`,
-                parse_mode: 'Markdown',
-              }),
-            }).catch(() => {});
+        if (!settlement.success) {
+          if (settlement.duplicate) {
+            console.log(`Payment payload ${payload} is already completed. Skipping duplicate entitlement.`);
+            return res.json({ ok: true, duplicate: true });
           }
+          return res.status(500).json({ ok: false, error: 'Payment settlement transaction failed' });
+        }
+
+        // Send confirmation via Telegram Bot
+        if (telegramBotToken && update.message.chat?.id) {
+          await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: update.message.chat.id,
+              text: `✨ پرداخت استارز شما با موفقیت تأیید شد!\nاشتراک **${plan.name}** برای شما فعال گردید. به آینـا بازگردید و از تمام امکانات VIP لذت ببرید. 🌸`,
+              parse_mode: 'Markdown',
+            }),
+          }).catch(() => {});
         }
       }
     }
