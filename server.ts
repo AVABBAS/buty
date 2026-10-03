@@ -316,7 +316,7 @@ app.post('/api/ai/make-it-mine', async (req: Request, res: Response) => {
     const response = await generateWithTimeout(
       ai.models.generateContent({
         model: 'gemini-3.8-flash',
-        contents: parts.length === 1 ? parts[0].text : { parts },
+        contents: parts.length === 1 ? parts[0].text : parts,
         config: {
           systemInstruction,
           responseMimeType: 'application/json',

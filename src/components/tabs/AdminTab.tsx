@@ -627,9 +627,44 @@ export const AdminTab: React.FC<AdminTabProps> = ({ adminId, adminUsername, onNa
                   </div>
                 </div>
 
+                {/* Subscription Status & Quick Grant */}
+                <div className="p-3 rounded-2xl bg-stone-950 border border-stone-800 space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-stone-200">وضعیت اشتراک:</span>
+                    {selectedUserDossier.subscription?.isActive ? (
+                      <span className="text-[10px] text-emerald-400 font-bold bg-emerald-950/60 border border-emerald-800/40 px-2 py-0.5 rounded-full">
+                        ● فعال ({selectedUserDossier.subscription.tier})
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-stone-400 bg-stone-900 px-2 py-0.5 rounded-full">
+                        رایگان (عادی)
+                      </span>
+                    )}
+                  </div>
+                  {selectedUserDossier.subscription?.expiresAt && (
+                    <div className="text-[10px] text-stone-400">
+                      انقضا: {new Date(selectedUserDossier.subscription.expiresAt).toLocaleDateString('fa-IR')}
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => {
+                      if (selectedUserDossier.profile?.telegram_id || selectedUserDossier.profile?.telegramId) {
+                        setGrantTargetId(selectedUserDossier.profile.telegram_id || selectedUserDossier.profile.telegramId);
+                      }
+                      setSelectedUserDossier(null);
+                      setActiveSection('subscriptions');
+                    }}
+                    className="w-full py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 active:scale-95 border border-amber-500/40 text-amber-300 font-bold text-xs flex items-center justify-center gap-1.5 transition-all"
+                  >
+                    <Crown className="w-3.5 h-3.5" />
+                    <span>اهدای / تمدید اشتراک برای این کاربر</span>
+                  </button>
+                </div>
+
                 <button
                   onClick={() => setSelectedUserDossier(null)}
-                  className="w-full py-2.5 rounded-xl bg-amber-500 text-stone-950 font-bold text-xs"
+                  className="w-full py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 font-bold text-xs transition-all"
                 >
                   بستن پرونده
                 </button>

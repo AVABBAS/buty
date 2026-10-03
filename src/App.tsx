@@ -158,10 +158,12 @@ export default function App() {
         body: JSON.stringify({
           telegramId: tgUserId,
           firstName: tgUserFirstName,
+          username: tgUsername,
           dna: userDna,
           closet: closetItems,
           shelf: shelfItems,
           savedLooks: savedLooks,
+          subscription: userSubscription,
         }),
       }).catch(() => {
         // Offline or server temporarily unreachable; safeStorage handles local persistence
@@ -169,7 +171,7 @@ export default function App() {
     }, 1500);
 
     return () => clearTimeout(timeout);
-  }, [userDna, closetItems, shelfItems, savedLooks, tgUserId, tgUserFirstName]);
+  }, [userDna, closetItems, shelfItems, savedLooks, userSubscription, tgUserId, tgUserFirstName, tgUsername]);
 
   // Telegram WebApp Setup & Initial DB Hydration
   useEffect(() => {
@@ -245,13 +247,16 @@ export default function App() {
         isHairStudioOpen ||
         isSkinProblemOpen ||
         isBodyAccessoriesOpen ||
-        isDailyChallengeOpen;
+        isDailyChallengeOpen ||
+        isPremiumModalOpen;
 
       if (isAnyModalOpen || currentTab !== 'home') {
         tg.BackButton.show();
 
         const handleBack = () => {
-          if (isSearchOpen) {
+          if (isPremiumModalOpen) {
+            setIsPremiumModalOpen(false);
+          } else if (isSearchOpen) {
             setIsSearchOpen(false);
           } else if (isMakeupStudioOpen) {
             setIsMakeupStudioOpen(false);
@@ -329,6 +334,7 @@ export default function App() {
     isSkinProblemOpen,
     isBodyAccessoriesOpen,
     isDailyChallengeOpen,
+    isPremiumModalOpen,
   ]);
 
   const handleAddClosetItem = (item: ClosetItem) => {

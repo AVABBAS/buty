@@ -12,6 +12,7 @@ export interface UserSyncPayload {
   closet?: any[];
   shelf?: any[];
   savedLooks?: any[];
+  subscription?: any;
 }
 
 export function isSafeId(id: unknown): id is string {
@@ -202,6 +203,7 @@ class DatabaseService {
     if (closet) this.embeddedData.closet[telegramId] = closet;
     if (shelf) this.embeddedData.shelf[telegramId] = shelf;
     if (savedLooks) this.embeddedData.savedLooks[telegramId] = savedLooks;
+    if (payload.subscription) this.embeddedData.subscriptions[telegramId] = payload.subscription;
 
     this.saveEmbeddedData();
     return true;
@@ -212,6 +214,7 @@ class DatabaseService {
     closet?: any[];
     shelf?: any[];
     savedLooks?: any[];
+    subscription?: any;
     profile?: any;
   } | null> {
     if (!isSafeId(telegramId)) return null;
@@ -230,6 +233,7 @@ class DatabaseService {
           closet: data.closet || undefined,
           shelf: data.shelf || undefined,
           savedLooks: data.saved_looks || undefined,
+          subscription: data.subscription || undefined,
         };
       } catch (err) {
         console.error('PostgreSQL fetch error:', err);
@@ -247,6 +251,7 @@ class DatabaseService {
       closet: this.embeddedData.closet[telegramId],
       shelf: this.embeddedData.shelf[telegramId],
       savedLooks: this.embeddedData.savedLooks[telegramId],
+      subscription: this.embeddedData.subscriptions[telegramId] || null,
     };
   }
 
