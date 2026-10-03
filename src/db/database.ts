@@ -210,13 +210,14 @@ class DatabaseService {
         );
 
         await this.pgPool.query(
-          `INSERT INTO ayna_user_data (telegram_id, dna, closet, shelf, saved_looks, updated_at)
-           VALUES ($1, $2, $3, $4, $5, NOW())
+          `INSERT INTO ayna_user_data (telegram_id, dna, closet, shelf, saved_looks, subscription, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, NOW())
            ON CONFLICT (telegram_id) DO UPDATE SET
              dna = COALESCE($2, ayna_user_data.dna),
              closet = COALESCE($3, ayna_user_data.closet),
              shelf = COALESCE($4, ayna_user_data.shelf),
              saved_looks = COALESCE($5, ayna_user_data.saved_looks),
+             subscription = COALESCE($6, ayna_user_data.subscription),
              updated_at = NOW()`,
           [
             telegramId,
@@ -224,6 +225,7 @@ class DatabaseService {
             closet ? JSON.stringify(closet) : null,
             shelf ? JSON.stringify(shelf) : null,
             savedLooks ? JSON.stringify(savedLooks) : null,
+            payload.subscription ? JSON.stringify(payload.subscription) : null,
           ]
         );
         return true;

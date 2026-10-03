@@ -157,8 +157,8 @@ function safeParseJson(rawText: string | undefined, fallback: any): any {
   return fallback;
 }
 
-// Helper with timeout to prevent hung connections
-async function generateWithTimeout(promise: Promise<any>, timeoutMs = 8000): Promise<any> {
+// Helper with timeout to prevent hung connections (16s provides reliable headroom for multimodal Gemini queries)
+async function generateWithTimeout(promise: Promise<any>, timeoutMs = 16000): Promise<any> {
   let timer: any;
   const timeoutPromise = new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error('AI generation timed out')), timeoutMs);
@@ -621,7 +621,7 @@ app.get(['/api/health', '/health'], async (_req: Request, res: Response) => {
 // -------------------------------------------------------------
 app.post('/api/user/sync', async (req: Request, res: Response) => {
   try {
-    const { telegramId, firstName, username, dna, closet, shelf, savedLooks } = req.body;
+    const { telegramId, firstName, username, dna, closet, shelf, savedLooks, subscription } = req.body;
     if (!isSafeId(telegramId)) {
       return res.status(400).json({ error: 'Valid telegramId is required' });
     }
@@ -633,6 +633,7 @@ app.post('/api/user/sync', async (req: Request, res: Response) => {
       closet: Array.isArray(closet) ? closet.slice(0, 500) : undefined,
       shelf: Array.isArray(shelf) ? shelf.slice(0, 500) : undefined,
       savedLooks: Array.isArray(savedLooks) ? savedLooks.slice(0, 500) : undefined,
+      subscription: subscription && typeof subscription === 'object' ? subscription : undefined,
     });
     return res.json({ ok: success });
   } catch (err) {

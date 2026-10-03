@@ -135,6 +135,8 @@ export default function App() {
     return safeStorage.get('ayna_saved_looks', []);
   });
 
+  const [isHydrated, setIsHydrated] = useState<boolean>(false);
+
   // Sync to safe storage
   useEffect(() => {
     safeStorage.set('ayna_beauty_dna', userDna);
@@ -145,12 +147,16 @@ export default function App() {
   }, [closetItems]);
 
   useEffect(() => {
+    safeStorage.set('ayna_shelf_items', shelfItems);
+  }, [shelfItems]);
+
+  useEffect(() => {
     safeStorage.set('ayna_saved_looks', savedLooks);
   }, [savedLooks]);
 
-  // Sync to backend database
+  // Sync to backend database (only after initial remote hydration completes to prevent race conditions)
   useEffect(() => {
-    if (!tgUserId) return;
+    if (!tgUserId || !isHydrated) return;
     const timeout = setTimeout(() => {
       fetch('/api/user/sync', {
         method: 'POST',
@@ -171,7 +177,7 @@ export default function App() {
     }, 1500);
 
     return () => clearTimeout(timeout);
-  }, [userDna, closetItems, shelfItems, savedLooks, userSubscription, tgUserId, tgUserFirstName, tgUsername]);
+  }, [userDna, closetItems, shelfItems, savedLooks, userSubscription, tgUserId, tgUserFirstName, tgUsername, isHydrated]);
 
   // Telegram WebApp Setup & Initial DB Hydration
   useEffect(() => {
@@ -190,28 +196,31 @@ export default function App() {
         const idStr = String(user.id);
         setTgUserId(idStr);
 
-        // Fetch remote data from DB
-        fetch(`/api/user/profile/${idStr}`)
-          .then((res) => (res.ok ? res.json() : null))
-          .then((data) => {
-            if (data) {
-              if (data.dna) setUserDna(data.dna);
-              if (Array.isArray(data.closet) && data.closet.length > 0) setClosetItems(data.closet);
-              if (Array.isArray(data.shelf) && data.shelf.length > 0) setShelfItems(data.shelf);
-              if (Array.isArray(data.savedLooks) && data.savedLooks.length > 0) setSavedLooks(data.savedLooks);
-            }
-          })
-          .catch(() => {});
-
-        fetch(`/api/user/subscription/${idStr}`)
-          .then((res) => (res.ok ? res.json() : null))
-          .then((data) => {
-            if (data?.subscription) {
-              setUserSubscription(data.subscription);
-              safeStorage.set('ayna_subscription', data.subscription);
-            }
-          })
-          .catch(() => {});
+        // Fetch remote data from DB with hydration race-condition prevention
+        Promise.allSettled([
+          fetch(`/api/user/profile/${idStr}`)
+            .then((res) => (res.ok ? res.json() : null))
+            .then((data) => {
+              if (data) {
+                if (data.dna) setUserDna(data.dna);
+                if (Array.isArray(data.closet) && data.closet.length > 0) setClosetItems(data.closet);
+                if (Array.isArray(data.shelf) && data.shelf.length > 0) setShelfItems(data.shelf);
+                if (Array.isArray(data.savedLooks) && data.savedLooks.length > 0) setSavedLooks(data.savedLooks);
+              }
+            }),
+          fetch(`/api/user/subscription/${idStr}`)
+            .then((res) => (res.ok ? res.json() : null))
+            .then((data) => {
+              if (data?.subscription) {
+                setUserSubscription(data.subscription);
+                safeStorage.set('ayna_subscription', data.subscription);
+              }
+            }),
+        ]).finally(() => {
+          setIsHydrated(true);
+        });
+      } else {
+        setIsHydrated(true);
       }
       if (tg.setHeaderColor) {
         tg.setHeaderColor('#141214');
@@ -219,6 +228,8 @@ export default function App() {
       if (tg.setBackgroundColor) {
         tg.setBackgroundColor('#141214');
       }
+    } else {
+      setIsHydrated(true);
     }
   }, []);
 
