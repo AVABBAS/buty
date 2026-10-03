@@ -17,6 +17,7 @@ import {
 import { SUBSCRIPTION_PLANS, VALID_PROMO_CODES } from '../../data/subscriptionPlans';
 import { SubscriptionTier, UserSubscription } from '../../types';
 import { sounds } from '../../utils/soundEffects';
+import { createTelegramStarsPayment, redeemPromoCode } from '../../services/api';
 
 interface PremiumModalProps {
   isOpen: boolean;
@@ -52,23 +53,32 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
   const rawPriceStars = selectedPlan.priceStars;
   const finalPriceStars = discountPercent > 0 ? Math.round(rawPriceStars * (1 - discountPercent / 100)) : rawPriceStars;
 
-  const handleApplyPromo = () => {
+  const handleApplyPromo = async () => {
     const code = promoCodeInput.trim().toUpperCase();
     if (!code) return;
-    if (VALID_PROMO_CODES[code]) {
-      const discount = VALID_PROMO_CODES[code];
-      setDiscountPercent(discount);
-      setPromoAppliedMsg(`کد تخفیف ${discount}٪ با موفقیت اعمال شد! ✨`);
-      setPromoErrorMsg(null);
-      if (window.Telegram?.WebApp?.HapticFeedback) {
-        window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
+
+    setIsProcessing(true);
+    try {
+      // Server-authoritative promo validation and redemption
+      const result = await redeemPromoCode(code);
+      if (result.ok && result.subscription) {
+        setPromoAppliedMsg(result.message || 'کد تخفیف با موفقیت اعمال شد! ✨');
+        setPromoErrorMsg(null);
+        onActivateSubscription(result.subscription);
+        if (window.Telegram?.WebApp?.HapticFeedback) {
+          window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
+        }
+      } else {
+        setPromoErrorMsg(result.message || 'کد تخفیف واردشده معتبر نیست یا منقضی شده است.');
+        setPromoAppliedMsg(null);
+        if (window.Telegram?.WebApp?.HapticFeedback) {
+          window.Telegram.WebApp.HapticFeedback.notificationOccurred('error');
+        }
       }
-    } else {
-      setPromoErrorMsg('کد تخفیف واردشده معتبر نیست یا منقضی شده است.');
-      setPromoAppliedMsg(null);
-      if (window.Telegram?.WebApp?.HapticFeedback) {
-        window.Telegram.WebApp.HapticFeedback.notificationOccurred('error');
-      }
+    } catch {
+      setPromoErrorMsg('خطا در اعتبارسنجی کد تخفیف');
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -79,30 +89,40 @@ export const PremiumModal: React.FC<PremiumModalProps> = ({
     }
 
     try {
-      // Simulate real Telegram payment or activation
-      await new Promise((resolve) => setTimeout(resolve, 1200));
-
-      const durationMonths = selectedPlan.durationMonths;
-      const expiry = new Date();
-      expiry.setMonth(expiry.getMonth() + durationMonths);
-
-      const newSub: UserSubscription = {
-        tier: selectedPlan.id,
-        isActive: true,
-        expiresAt: expiry.toISOString(),
-        startedAt: new Date().toISOString(),
-        planName: selectedPlan.name,
-        paymentMethod: selectedPaymentMethod === 'stars' ? 'stars' : selectedPaymentMethod === 'card' ? 'card' : 'promo',
-      };
-
-      onActivateSubscription(newSub);
-      setPaymentStep('success');
-
-      if (window.Telegram?.WebApp?.HapticFeedback) {
-        window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
+      if (selectedPaymentMethod === 'stars') {
+        // Real Server-Authoritative Telegram Stars Payment
+        const res = await createTelegramStarsPayment(selectedPlan.id);
+        if (res.ok && res.invoiceLink) {
+          // If in Telegram WebApp, open official Telegram Stars invoice modal
+          if (window.Telegram?.WebApp?.openInvoice) {
+            window.Telegram.WebApp.openInvoice(res.invoiceLink, (status: string) => {
+              if (status === 'paid') {
+                const expiry = new Date();
+                expiry.setMonth(expiry.getMonth() + selectedPlan.durationMonths);
+                onActivateSubscription({
+                  tier: selectedPlan.id,
+                  isActive: true,
+                  expiresAt: expiry.toISOString(),
+                  startedAt: new Date().toISOString(),
+                  planName: selectedPlan.name,
+                  paymentMethod: 'stars',
+                });
+                setPaymentStep('success');
+              }
+            });
+          } else {
+            // Browser sandbox: open invoice in new tab / redirect
+            window.open(res.invoiceLink, '_blank');
+          }
+        } else {
+          setPromoErrorMsg(res.error || 'خطا در ایجاد فاکتور تلگرام استارز. لطفاً توکن بات را بررسی کنید.');
+        }
+      } else if (selectedPaymentMethod === 'card') {
+        // Iranian Gateway / Card flow: Transparent status, no fake simulation
+        setPromoErrorMsg('درگاه مستقیم بانکی در حال تکمیل است. لطفاً از گزینه تلگرام استارز (⭐) استفاده فرمایید یا پس از واریز، شماره پیگیری را به پشتیبانی ارسال کنید.');
       }
-    } catch {
-      // Handle error
+    } catch (err: any) {
+      setPromoErrorMsg(err?.message || 'خطا در ارتباط با درگاه پرداخت');
     } finally {
       setIsProcessing(false);
     }

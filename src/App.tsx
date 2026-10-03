@@ -38,6 +38,7 @@ import { DailyChallengeModal } from './components/modals/DailyChallengeModal';
 import { PremiumModal } from './components/modals/PremiumModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { safeStorage } from './utils/safeStorage';
+import { getAuthHeaders, trackUserEvent } from './services/api';
 
 const INITIAL_DNA: BeautyDna = {
   faceShape: 'oval',
@@ -160,7 +161,7 @@ export default function App() {
     const timeout = setTimeout(() => {
       fetch('/api/user/sync', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           telegramId: tgUserId,
           firstName: tgUserFirstName,
@@ -169,15 +170,22 @@ export default function App() {
           closet: closetItems,
           shelf: shelfItems,
           savedLooks: savedLooks,
-          subscription: userSubscription,
         }),
-      }).catch(() => {
-        // Offline or server temporarily unreachable; safeStorage handles local persistence
-      });
+      })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data?.subscription) {
+            setUserSubscription(data.subscription);
+            safeStorage.set('ayna_subscription', data.subscription);
+          }
+        })
+        .catch(() => {
+          // Offline or server temporarily unreachable; safeStorage handles local persistence
+        });
     }, 1500);
 
     return () => clearTimeout(timeout);
-  }, [userDna, closetItems, shelfItems, savedLooks, userSubscription, tgUserId, tgUserFirstName, tgUsername, isHydrated]);
+  }, [userDna, closetItems, shelfItems, savedLooks, tgUserId, tgUserFirstName, tgUsername, isHydrated]);
 
   // Telegram WebApp Setup & Initial DB Hydration
   useEffect(() => {
@@ -358,11 +366,13 @@ export default function App() {
 
   const handleSaveLook = (look: SavedLook) => {
     setSavedLooks((prev) => [look, ...prev]);
+    trackUserEvent('look_saved' as any, 'looks', { title: look.title }, { vibe: look.vibe });
   };
 
   const handleOpenRoutine = (time: number) => {
     setRoutineTime(time);
     setIsRoutineOpen(true);
+    trackUserEvent('routine_completed' as any, 'routine', { timeMinutes: time }, { durationMinutes: time });
   };
 
   return (

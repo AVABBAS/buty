@@ -125,6 +125,8 @@ export interface TodayPlanResult {
   goodEnoughMessage: string;
 }
 
+export * from './intelligence';
+
 declare global {
   interface Window {
     Telegram?: {

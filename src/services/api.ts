@@ -1,11 +1,37 @@
-import { MakeItMineResult, TriageResult, SecondOpinionResult, TodayPlanResult, BeautyDna } from '../types';
+import {
+  MakeItMineResult,
+  TriageResult,
+  SecondOpinionResult,
+  TodayPlanResult,
+  BeautyDna,
+  UserEventType,
+  RecommendationResponse,
+} from '../types';
 
-async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 9000): Promise<Response> {
+export function getAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (typeof window !== 'undefined' && window.Telegram?.WebApp?.initData) {
+    headers['Authorization'] = `Bearer ${window.Telegram.WebApp.initData}`;
+    headers['x-telegram-init-data'] = window.Telegram.WebApp.initData;
+  }
+  return headers;
+}
+
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 12000): Promise<Response> {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
+  const authHeaders = getAuthHeaders();
+  const mergedHeaders = {
+    ...authHeaders,
+    ...(options.headers as Record<string, string> || {}),
+  };
+
   try {
     const response = await fetch(url, {
       ...options,
+      headers: mergedHeaders,
       signal: controller.signal,
     });
     clearTimeout(id);
@@ -169,3 +195,84 @@ export async function requestCoachChat(
     return 'من پیشتم! یادت باشه زیبایی یک نمره یا قضاوت دیگران نیست؛ یک حسه. چه کار کوچیکی هست که همین الان در ۳ دقیقه بهت حس سبکی و شادابی میده؟';
   }
 }
+
+/**
+ * Records user feedback events (recommendation_saved, look_tried, etc.) to backend learning engine.
+ */
+export async function trackUserEvent(
+  eventType: UserEventType,
+  feature: string,
+  context?: Record<string, any>,
+  metadata?: Record<string, any>
+): Promise<boolean> {
+  try {
+    const res = await fetchWithTimeout('/api/events', {
+      method: 'POST',
+      body: JSON.stringify({ eventType, feature, context, metadata }),
+    }, 4000);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Creates an authentic Telegram Stars invoice link via backend Bot API.
+ */
+export async function createTelegramStarsPayment(planId: string): Promise<{
+  ok: boolean;
+  invoiceLink?: string;
+  invoicePayload?: string;
+  error?: string;
+}> {
+  try {
+    const res = await fetchWithTimeout('/api/payment/telegram-stars/create', {
+      method: 'POST',
+      body: JSON.stringify({ planId }),
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { ok: false, error: err?.message || 'Failed to communicate with payment gateway' };
+  }
+}
+
+/**
+ * Requests 2-3 strictly curated personalized recommendations from the Central Decision Engine.
+ */
+export async function requestPersonalizedRecommendation(requestPayload: {
+  goal: string;
+  availableTimeMinutes?: number;
+  occasion?: string;
+  inputDescription?: string;
+}): Promise<RecommendationResponse | null> {
+  try {
+    const res = await fetchWithTimeout('/api/ai/recommend', {
+      method: 'POST',
+      body: JSON.stringify(requestPayload),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Validates and redeems a promo code server-side.
+ */
+export async function redeemPromoCode(code: string): Promise<{
+  ok: boolean;
+  message?: string;
+  subscription?: any;
+}> {
+  try {
+    const res = await fetchWithTimeout('/api/subscription/redeem-promo', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { ok: false, message: err?.message || 'Network error redeeming promo code' };
+  }
+}
+

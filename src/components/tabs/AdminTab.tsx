@@ -62,11 +62,20 @@ export const AdminTab: React.FC<AdminTabProps> = ({ adminId, adminUsername, onNa
   const [sandboxResponse, setSandboxResponse] = useState<any>(null);
   const [isSandboxRunning, setIsSandboxRunning] = useState<boolean>(false);
 
-  const adminHeaders = {
-    'x-admin-id': adminId || '291775184',
-    'x-admin-username': adminUsername || 'av_abbas',
-    'Content-Type': 'application/json',
+  const getAdminHeaders = (): Record<string, string> => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'x-admin-id': adminId || '291775184',
+      'x-admin-username': adminUsername || 'av_abbas',
+    };
+    if (typeof window !== 'undefined' && window.Telegram?.WebApp?.initData) {
+      headers['Authorization'] = `Bearer ${window.Telegram.WebApp.initData}`;
+      headers['x-telegram-init-data'] = window.Telegram.WebApp.initData;
+    }
+    return headers;
   };
+
+  const adminHeaders = getAdminHeaders();
 
   const showNotification = (msg: string) => {
     setActionMessage(msg);

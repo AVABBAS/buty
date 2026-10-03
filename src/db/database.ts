@@ -45,6 +45,9 @@ class DatabaseService {
     shelf: Record<string, any[]>;
     savedLooks: Record<string, any[]>;
     subscriptions: Record<string, any>;
+    events: Array<{ id: number; telegramId: string; eventType: string; feature?: string; context?: any; metadata?: any; createdAt: string }>;
+    preferences: Record<string, any>;
+    payments: Record<string, any>;
   } = {
     users: {},
     dna: {},
@@ -52,6 +55,9 @@ class DatabaseService {
     shelf: {},
     savedLooks: {},
     subscriptions: {},
+    events: [],
+    preferences: {},
+    payments: {},
   };
 
   constructor() {
@@ -70,6 +76,13 @@ class DatabaseService {
 
   async init(): Promise<void> {
     const dbUrl = process.env.DATABASE_URL;
+    const isProd = process.env.NODE_ENV === 'production';
+
+    // Strict Production Hardening: Fail fast if DATABASE_URL is missing in production
+    if (isProd && (!dbUrl || (!dbUrl.startsWith('postgres://') && !dbUrl.startsWith('postgresql://')))) {
+      console.error('❌ FATAL: Production environment requires a valid DATABASE_URL (Neon PostgreSQL). Silent fallback to embedded JSON is disabled in production.');
+      throw new Error('DATABASE_URL is required in production');
+    }
 
     if (dbUrl && (dbUrl.startsWith('postgres://') || dbUrl.startsWith('postgresql://'))) {
       try {
@@ -139,15 +152,53 @@ class DatabaseService {
             updated_at TIMESTAMP DEFAULT NOW()
           );
 
+          CREATE TABLE IF NOT EXISTS ayna_user_events (
+            id SERIAL PRIMARY KEY,
+            telegram_id VARCHAR(64) NOT NULL,
+            event_type VARCHAR(64) NOT NULL,
+            feature VARCHAR(64),
+            context JSONB,
+            metadata JSONB,
+            created_at TIMESTAMP DEFAULT NOW()
+          );
+
+          CREATE TABLE IF NOT EXISTS ayna_user_preferences (
+            telegram_id VARCHAR(64) PRIMARY KEY,
+            preferences JSONB NOT NULL DEFAULT '{}',
+            learned_weights JSONB NOT NULL DEFAULT '{}',
+            updated_at TIMESTAMP DEFAULT NOW()
+          );
+
+          CREATE TABLE IF NOT EXISTS ayna_payments (
+            id SERIAL PRIMARY KEY,
+            telegram_id VARCHAR(64) NOT NULL,
+            provider VARCHAR(32) NOT NULL,
+            plan_id VARCHAR(32) NOT NULL,
+            amount_stars INT,
+            amount_toman INT,
+            invoice_payload VARCHAR(128) UNIQUE,
+            telegram_payment_charge_id VARCHAR(128),
+            status VARCHAR(32) NOT NULL DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW()
+          );
+
           CREATE INDEX IF NOT EXISTS idx_ayna_users_last_active ON ayna_users(last_active);
           CREATE INDEX IF NOT EXISTS idx_ayna_user_data_updated ON ayna_user_data(updated_at);
           CREATE INDEX IF NOT EXISTS idx_ayna_subscriptions_active ON ayna_subscriptions(is_active);
+          CREATE INDEX IF NOT EXISTS idx_ayna_events_user_type ON ayna_user_events(telegram_id, event_type);
+          CREATE INDEX IF NOT EXISTS idx_ayna_events_created ON ayna_user_events(created_at);
+          CREATE INDEX IF NOT EXISTS idx_ayna_payments_user ON ayna_payments(telegram_id);
+          CREATE INDEX IF NOT EXISTS idx_ayna_payments_payload ON ayna_payments(invoice_payload);
         `);
 
         this.isPostgres = true;
         console.log(`✅ Connected to ${isNeon ? 'Neon Serverless PostgreSQL' : 'PostgreSQL'} database successfully with connection pooling and indexes!`);
         return;
       } catch (err) {
+        if (isProd) {
+          throw err;
+        }
         console.warn('⚠️ PostgreSQL connection failed, falling back to embedded persistent database:', err);
         this.pgPool = null;
         this.isPostgres = false;
@@ -167,12 +218,31 @@ class DatabaseService {
         if (!this.embeddedData.subscriptions) {
           this.embeddedData.subscriptions = {};
         }
+        if (!this.embeddedData.events) {
+          this.embeddedData.events = [];
+        }
+        if (!this.embeddedData.preferences) {
+          this.embeddedData.preferences = {};
+        }
+        if (!this.embeddedData.payments) {
+          this.embeddedData.payments = {};
+        }
       } else {
         this.saveEmbeddedData();
       }
     } catch (e) {
       console.warn('Failed to load embedded DB file, resetting to empty state:', e);
-      this.embeddedData = { users: {}, dna: {}, closet: {}, shelf: {}, savedLooks: {}, subscriptions: {} };
+      this.embeddedData = {
+        users: {},
+        dna: {},
+        closet: {},
+        shelf: {},
+        savedLooks: {},
+        subscriptions: {},
+        events: [],
+        preferences: {},
+        payments: {},
+      };
     }
   }
 
@@ -547,6 +617,232 @@ class DatabaseService {
       subscription: sub,
       user: this.embeddedData.users[id] || null,
     }));
+  }
+
+  // -------------------------------------------------------------
+  // User Feedback Events & Behavioral Learning Persistence
+  // -------------------------------------------------------------
+  async recordEvent(event: {
+    telegramId: string;
+    eventType: string;
+    feature?: string;
+    context?: any;
+    metadata?: any;
+  }): Promise<boolean> {
+    const { telegramId, eventType, feature, context, metadata } = event;
+    if (!isSafeId(telegramId)) return false;
+
+    if (this.isPostgres && this.pgPool) {
+      try {
+        await this.pgPool.query(
+          `INSERT INTO ayna_user_events (telegram_id, event_type, feature, context, metadata, created_at)
+           VALUES ($1, $2, $3, $4, $5, NOW())`,
+          [
+            telegramId,
+            eventType,
+            feature || null,
+            context ? JSON.stringify(context) : null,
+            metadata ? JSON.stringify(metadata) : null,
+          ]
+        );
+        return true;
+      } catch (err) {
+        console.error('PostgreSQL recordEvent error:', err);
+        return false;
+      }
+    }
+
+    // Embedded fallback
+    const id = this.embeddedData.events.length + 1;
+    this.embeddedData.events.push({
+      id,
+      telegramId,
+      eventType,
+      feature,
+      context,
+      metadata,
+      createdAt: new Date().toISOString(),
+    });
+    this.saveEmbeddedData();
+    return true;
+  }
+
+  async getUserEvents(telegramId: string, limit = 50): Promise<any[]> {
+    if (!isSafeId(telegramId)) return [];
+
+    if (this.isPostgres && this.pgPool) {
+      try {
+        const res = await this.pgPool.query(
+          `SELECT id, telegram_id, event_type, feature, context, metadata, created_at
+           FROM ayna_user_events
+           WHERE telegram_id = $1
+           ORDER BY created_at DESC
+           LIMIT $2`,
+          [telegramId, limit]
+        );
+        return res.rows.map((row: any) => ({
+          id: row.id,
+          telegramId: row.telegram_id,
+          eventType: row.event_type,
+          feature: row.feature,
+          context: row.context,
+          metadata: row.metadata,
+          createdAt: row.created_at,
+        }));
+      } catch (err) {
+        console.error('PostgreSQL getUserEvents error:', err);
+        return [];
+      }
+    }
+
+    return this.embeddedData.events
+      .filter((e) => e.telegramId === telegramId)
+      .slice(-limit)
+      .reverse();
+  }
+
+  async getLearnedPreferences(telegramId: string): Promise<any | null> {
+    if (!isSafeId(telegramId)) return null;
+
+    if (this.isPostgres && this.pgPool) {
+      try {
+        const res = await this.pgPool.query(
+          `SELECT preferences, learned_weights, updated_at
+           FROM ayna_user_preferences
+           WHERE telegram_id = $1`,
+          [telegramId]
+        );
+        if (res.rows[0]) {
+          return {
+            preferences: res.rows[0].preferences,
+            learnedWeights: res.rows[0].learned_weights,
+            updatedAt: res.rows[0].updated_at,
+          };
+        }
+        return null;
+      } catch (err) {
+        console.error('PostgreSQL getLearnedPreferences error:', err);
+        return null;
+      }
+    }
+
+    return this.embeddedData.preferences[telegramId] || null;
+  }
+
+  async saveLearnedPreferences(telegramId: string, preferences: any, learnedWeights: any): Promise<boolean> {
+    if (!isSafeId(telegramId)) return false;
+
+    if (this.isPostgres && this.pgPool) {
+      try {
+        await this.pgPool.query(
+          `INSERT INTO ayna_user_preferences (telegram_id, preferences, learned_weights, updated_at)
+           VALUES ($1, $2, $3, NOW())
+           ON CONFLICT (telegram_id) DO UPDATE SET
+             preferences = COALESCE($2, ayna_user_preferences.preferences),
+             learned_weights = COALESCE($3, ayna_user_preferences.learned_weights),
+             updated_at = NOW()`,
+          [telegramId, JSON.stringify(preferences || {}), JSON.stringify(learnedWeights || {})]
+        );
+        return true;
+      } catch (err) {
+        console.error('PostgreSQL saveLearnedPreferences error:', err);
+        return false;
+      }
+    }
+
+    this.embeddedData.preferences[telegramId] = {
+      preferences,
+      learnedWeights,
+      updatedAt: new Date().toISOString(),
+    };
+    this.saveEmbeddedData();
+    return true;
+  }
+
+  // -------------------------------------------------------------
+  // Telegram Stars & Payment Record Persistence
+  // -------------------------------------------------------------
+  async createPaymentRecord(record: {
+    telegramId: string;
+    provider: string;
+    planId: string;
+    amountStars?: number;
+    amountToman?: number;
+    invoicePayload: string;
+  }): Promise<boolean> {
+    const { telegramId, provider, planId, amountStars, amountToman, invoicePayload } = record;
+    if (!isSafeId(telegramId)) return false;
+
+    if (this.isPostgres && this.pgPool) {
+      try {
+        await this.pgPool.query(
+          `INSERT INTO ayna_payments (telegram_id, provider, plan_id, amount_stars, amount_toman, invoice_payload, status, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, 'pending', NOW(), NOW())
+           ON CONFLICT (invoice_payload) DO NOTHING`,
+          [telegramId, provider, planId, amountStars || null, amountToman || null, invoicePayload]
+        );
+        return true;
+      } catch (err) {
+        console.error('PostgreSQL createPaymentRecord error:', err);
+        return false;
+      }
+    }
+
+    this.embeddedData.payments[invoicePayload] = {
+      ...record,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    this.saveEmbeddedData();
+    return true;
+  }
+
+  async updatePaymentStatus(invoicePayload: string, status: string, chargeId?: string): Promise<boolean> {
+    if (!invoicePayload) return false;
+
+    if (this.isPostgres && this.pgPool) {
+      try {
+        await this.pgPool.query(
+          `UPDATE ayna_payments
+           SET status = $1, telegram_payment_charge_id = COALESCE($2, telegram_payment_charge_id), updated_at = NOW()
+           WHERE invoice_payload = $3`,
+          [status, chargeId || null, invoicePayload]
+        );
+        return true;
+      } catch (err) {
+        console.error('PostgreSQL updatePaymentStatus error:', err);
+        return false;
+      }
+    }
+
+    if (this.embeddedData.payments[invoicePayload]) {
+      this.embeddedData.payments[invoicePayload].status = status;
+      if (chargeId) this.embeddedData.payments[invoicePayload].telegramPaymentChargeId = chargeId;
+      this.embeddedData.payments[invoicePayload].updatedAt = new Date().toISOString();
+      this.saveEmbeddedData();
+      return true;
+    }
+    return false;
+  }
+
+  async getPaymentRecord(invoicePayload: string): Promise<any | null> {
+    if (!invoicePayload) return null;
+
+    if (this.isPostgres && this.pgPool) {
+      try {
+        const res = await this.pgPool.query(
+          `SELECT * FROM ayna_payments WHERE invoice_payload = $1`,
+          [invoicePayload]
+        );
+        return res.rows[0] || null;
+      } catch (err) {
+        console.error('PostgreSQL getPaymentRecord error:', err);
+        return null;
+      }
+    }
+
+    return this.embeddedData.payments[invoicePayload] || null;
   }
 }
 
